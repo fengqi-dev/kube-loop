@@ -43,14 +43,9 @@ func main() {
 	tray := desktopapp.New(app, trayIcon)
 	err := wails.Run(&options.App{
 		Title:             "KubeLoop",
-		Width:             900,
-		Height:            580,
-		MinWidth:          900,
-		MinHeight:         580,
-		MaxWidth:          900,
-		MaxHeight:         580,
-		DisableResize:     true,
-		Frameless:         true,
+		Width:             1080,
+		Height:            720,
+		Frameless:         goruntime.GOOS != "darwin",
 		HideWindowOnClose: true,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "dev.fengqi.kube-loop",
@@ -67,6 +62,7 @@ func main() {
 			},
 		},
 		Mac: &macoptions.Options{
+			TitleBar: macoptions.TitleBarHidden(),
 			OnUrlOpen: func(rawURL string) {
 				deliverAuthCallback(app, rawURL)
 			},

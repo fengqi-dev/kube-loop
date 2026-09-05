@@ -111,6 +111,7 @@ export function SFTPFileManagerDialog({
   profileId?: string;
   pod: PodInfo | RemotePod | null;
 }) {
+  const [paneSide, setPaneSide] = useState<"local" | "remote">("local");
   const { t } = useI18n();
   const [container, setContainer] = useState("");
   const [localPath, setLocalPath] = useState("");
@@ -424,7 +425,7 @@ export function SFTPFileManagerDialog({
       >
         <DialogContent
           overlayClassName="z-[50] bg-black/30 backdrop-blur-none"
-          className="inset-3 top-3 left-3 z-[60] h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_190px] gap-4 rounded-2xl border-border bg-background p-5 opacity-100 shadow-2xl sm:max-w-none"
+          className="sftp-dialog inset-3 top-3 left-3 z-[60] h-auto max-h-none w-auto max-w-none translate-x-0 translate-y-0 grid-rows-[auto_minmax(0,1fr)_190px] gap-4 rounded-2xl border-border bg-background p-5 opacity-100 shadow-2xl sm:max-w-none"
           onContextMenu={(event) => event.preventDefault()}
         >
           <DialogHeader className="border-b border-border/70 pb-3">
@@ -446,7 +447,11 @@ export function SFTPFileManagerDialog({
             </DialogDescription>
           </DialogHeader>
 
-        <div className="grid min-h-0 grid-cols-[minmax(360px,1fr)_44px_minmax(360px,1fr)] gap-3 overflow-x-auto">
+        <div className="flex gap-2 sm:hidden" role="group" aria-label={t("sftp.managerTitle")}>
+          <Button variant={paneSide === "local" ? "secondary" : "ghost"} onClick={() => setPaneSide("local")}>{t("workspace.local")}</Button>
+          <Button variant={paneSide === "remote" ? "secondary" : "ghost"} onClick={() => setPaneSide("remote")}>{t("workspace.remote")}</Button>
+        </div>
+        <div data-side={paneSide} className="sftp-panes grid min-h-0 grid-cols-[minmax(0,1fr)_36px_minmax(0,1fr)] gap-2 overflow-x-auto">
           <FilePane
             side="local"
             title={t("sftp.localComputer")}
@@ -715,7 +720,7 @@ function FilePane({
     : entries.filter((entry) => !entry.name.startsWith("."));
   useEffect(() => setDraftPath(path), [path]);
   return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/90 bg-background shadow-sm">
+    <div data-file-pane={side} className="flex min-h-0 flex-col overflow-hidden rounded-xl border border-border/90 bg-background shadow-sm">
       <div className="flex items-center gap-2.5 border-b border-border/80 bg-muted/35 px-3.5 py-2.5">
         {side === "local" ? <FolderOpen className="size-[18px] text-primary" /> : <Folder className="size-[18px] text-primary" />}
         <span className="text-[13px] font-semibold tracking-[-0.01em]">{title}</span>

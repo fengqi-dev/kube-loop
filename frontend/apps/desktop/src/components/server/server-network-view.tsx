@@ -1,3 +1,8 @@
+import { ToolbarActions } from "@/components/workspace/toolbar-actions";
+import { useRequestGeneration } from "@/components/workspace/use-request-generation";
+import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
+import { resourceKey } from "@/components/workspace/workspace-model";
+import { useI18n } from "@/i18n";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Globe2, Network, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -24,7 +29,10 @@ import type {
 
 type Action = "port-forward" | "exchange" | "mirror" | "preview";
 
-export function ServerNetworkView({ profileId }: { profileId: string }) {
+export function ServerNetworkView({ profileId, active = true, selectedNamespace, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; onNamespaceChange?(namespace: string): void }) {
+  const { t } = useI18n();
+  const workspace = useResourceWorkspace();
+  const requests = useRequestGeneration();
   const [inventory, setInventory] = useState<RemoteInventory>();
   const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
   const [exchanges, setExchanges] = useState<ServerExchangeInfo[]>([]);
@@ -44,7 +52,9 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   const [error, setError] = useState("");
 
   const load = useCallback(async (namespace = "") => {
+    const isCurrent = requests.begin();
     if (!profileId) {
+      if (!isCurrent()) return;
       setInventory(undefined);
       setLoading(false);
       return;
@@ -52,11 +62,13 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
     setLoading(true);
     try {
       const next = await backend.loadServerInventory(profileId, namespace);
+      if (!isCurrent()) return;
       setInventory(next);
       const [nextForwards, nextExchanges, nextMirrors, nextPreviews] = await Promise.allSettled([
         backend.listServerPortForwards(profileId), backend.listServerExchanges(profileId),
         backend.listServerMirrors(profileId), backend.listServerPreviews(profileId),
       ]);
+      if (!isCurrent()) return;
       if (nextForwards.status === "fulfilled") setForwards(nextForwards.value);
       if (nextExchanges.status === "fulfilled") setExchanges(nextExchanges.value);
       if (nextMirrors.status === "fulfilled") setMirrors(nextMirrors.value);
@@ -66,17 +78,23 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
         .map((result) => messageOf(result.reason));
       setError(failures.join("\n"));
     } catch (reason) {
+      if (!isCurrent()) return;
       setError(messageOf(reason));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [profileId]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (active) void load(selectedNamespace ?? inventory?.namespace);
+    else requests.invalidate();
+    // Keep each view’s filters while revalidating its current namespace.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, active, selectedNamespace]);
 
   const services = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    return (inventory?.services ?? []).filter((item) => !normalized || [
+  return (inventory?.services ?? []).filter((item) => !normalized || [
       item.name, item.namespace, item.type, item.clusterIp, item.externalName,
     ].some((value) => value?.toLocaleLowerCase().includes(normalized)));
   }, [inventory?.services, query]);
@@ -135,17 +153,30 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
   const canExchange = inventory?.capabilities.includes("services.exchange") ?? false;
   const canMirror = inventory?.capabilities.includes("services.mirror") ?? false;
   const canPreview = inventory?.capabilities.includes("services.preview") ?? false;
+    const workspaceResources = (inventory?.services ?? []).map(item => ({
+    key: resourceKey({ profileId, namespace: item.namespace, kind: "service", id: item.name }),
+    label: item.name, namespace: item.namespace,
+    fields: [[t("network.colNamespace"), item.namespace], [t("workspace.type"), item.type],
+      [t("workspace.address"), item.clusterIp || item.externalName],
+      [t("network.colPorts"), item.ports.map(port => `${port.protocol}/${port.port}`).join(", ")]] as Array<[string, React.ReactNode]>,
+    actions: <>
+      <ActionIconButton label="Port Forward" icon={portForwardIcon} disabled={!ready || !canForward || forwards.some(entry => entry.kind === "service" && entry.name === item.name && entry.namespace === item.namespace)} onClick={() => selectAction("port-forward", item)} />
+      <ActionIconButton label="Exchange" icon={exchangeIcon} disabled={!ready || !canExchange || exchanges.some(entry => entry.service === item.name && entry.namespace === item.namespace)} onClick={() => selectAction("exchange", item)} />
+      <ActionIconButton label="Mirror" icon={mirrorIcon} disabled={!ready || !canMirror || mirrors.some(entry => entry.service === item.name && entry.namespace === item.namespace)} onClick={() => selectAction("mirror", item)} />
+    </>,
+  }));
   return (
     <PageShell title="Network" description="Manage Services and Session-bound traffic operations through the Gateway.">
-      <div className="mb-4 flex flex-nowrap items-center gap-2">
-        <select className="h-9 w-[180px] shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={inventory?.namespace ?? ""} disabled={!inventory || loading} onChange={(event) => void load(event.target.value)}>
+      <div className="resource-toolbar">
+        <select className="h-9 w-[180px] shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={inventory?.namespace ?? ""} disabled={!inventory || loading} onChange={(event) => onNamespaceChange ? onNamespaceChange(event.target.value) : void load(event.target.value)}>
           {!inventory ? <option value="" disabled>Loading…</option> : null}
           {(inventory?.namespaces ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select>
         <Input className="min-w-0 flex-1" value={query} placeholder="Search Services" onChange={(event) => setQuery(event.target.value)} />
         <Button className="shrink-0 whitespace-nowrap" type="button" variant="outline" size="sm" disabled={!profileId || loading} onClick={() => void load(inventory?.namespace)}>{loading ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}Refresh</Button>
-        <Button className="shrink-0 whitespace-nowrap" type="button" size="sm" disabled={!inventory?.session || !ready || !canPreview} onClick={() => selectAction("preview")}><Globe2 size={14} />Create Preview</Button>
+        <ToolbarActions><Button className="shrink-0 whitespace-nowrap" type="button" size="sm" disabled={!inventory?.session || !ready || !canPreview} onClick={() => selectAction("preview")}><Globe2 size={14} />Create Preview</Button></ToolbarActions>
       </div>
+      <ResourceWorkspace namespace={inventory?.namespace} workspace={workspace} resources={workspaceResources} settled={!loading && !error}>
       {!profileId || (!inventory && !loading) ? <EmptyState icon={Network} title="Network unavailable" detail={error || "Select and sign in to a Server first."} /> : <div className="space-y-5">
         {error ? <p className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
         <div className="overflow-hidden rounded-lg border bg-card">
@@ -169,7 +200,10 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
             const exchange = exchanges.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const mirror = mirrors.some((entry) => entry.service === item.name && entry.namespace === item.namespace);
             const preview = previews.some((entry) => entry.name === item.name && entry.namespace === item.namespace);
-            return <TableRow key={`${item.namespace}/${item.name}`}><TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell><TableCell>{item.namespace}</TableCell><TableCell>{item.type}</TableCell><TableCell className="font-mono text-xs"><CopyableText value={item.clusterIp || item.externalName} /></TableCell><TableCell className="font-mono text-xs text-muted-foreground">{item.ports.length > 0 ? <div className="flex flex-col items-start gap-0.5">{item.ports.map((port) => <CopyableText key={`${port.protocol}-${port.port}-${port.name || ""}`} value={item.clusterIp ? `${item.clusterIp}:${port.port}` : null} label={`${port.protocol}/${port.port}`} titleKey="network.copyAddress" successKey="network.addressCopied" failKey="network.addressCopyFailed" empty={`${port.protocol}/${port.port}`} />)}</div> : "—"}</TableCell>
+            return <TableRow key={`${item.namespace}/${item.name}`} className="cursor-pointer" tabIndex={0}
+              data-state={workspace.state.active === resourceKey({ profileId, namespace: item.namespace, kind: "service", id: item.name }) ? "selected" : undefined}
+              onClick={event => { if (!(event.target as HTMLElement).closest("button, a")) workspace.open(workspaceResources.find(resource => resource.label === item.name && resource.namespace === item.namespace)!); }}
+              onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") workspace.open(workspaceResources.find(resource => resource.label === item.name && resource.namespace === item.namespace)!); }}><TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={item.name}>{item.name}</span></TableCell><TableCell>{item.namespace}</TableCell><TableCell>{item.type}</TableCell><TableCell className="font-mono text-xs"><CopyableText value={item.clusterIp || item.externalName} /></TableCell><TableCell className="font-mono text-xs text-muted-foreground">{item.ports.length > 0 ? <div className="flex flex-col items-start gap-0.5">{item.ports.map((port) => <CopyableText key={`${port.protocol}-${port.port}-${port.name || ""}`} value={item.clusterIp ? `${item.clusterIp}:${port.port}` : null} label={`${port.protocol}/${port.port}`} titleKey="network.copyAddress" successKey="network.addressCopied" failKey="network.addressCopyFailed" empty={`${port.protocol}/${port.port}`} />)}</div> : "—"}</TableCell>
               <TableCell><div className="flex items-center gap-1"><ActionIconButton label="Port Forward" icon={portForwardIcon} disabled={forward || preview || !ready || !canForward} onClick={() => selectAction("port-forward", item)} /><ActionIconButton label="Exchange" icon={exchangeIcon} disabled={preview || !ready || !canExchange || exchange || mirror} onClick={() => selectAction("exchange", item)} /><ActionIconButton label="Mirror" icon={mirrorIcon} disabled={preview || !ready || !canMirror || exchange || mirror} onClick={() => selectAction("mirror", item)} /></div></TableCell></TableRow>;
               })
             )}
@@ -177,6 +211,8 @@ export function ServerNetworkView({ profileId }: { profileId: string }) {
           <ResourcePagination page={page} total={services.length} showWhenEmpty onPageChange={setPage} />
         </div>
       </div>}
+
+      </ResourceWorkspace>
 
       <Dialog
         open={action === "port-forward"}

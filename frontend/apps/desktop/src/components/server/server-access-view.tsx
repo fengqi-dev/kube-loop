@@ -1,3 +1,4 @@
+import { useRequestGeneration } from "@/components/workspace/use-request-generation";
 import { backend } from "@/backend";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,10 +38,9 @@ const ServerExecTerminal = lazy(() => import("@/components/server/server-exec-te
   default: module.ServerExecTerminal,
 })));
 
-export function ServerAccessView({
+export function useServerConnection({
   profiles,
   authSession,
-  management = false,
   overviewVisible = true,
   onProfilesChange,
   onAuthChange,
@@ -49,13 +49,14 @@ export function ServerAccessView({
 }: {
   profiles: ServerProfileState;
   authSession?: AuthSession;
-  management?: boolean;
   overviewVisible?: boolean;
   onProfilesChange?(profiles: ServerProfileState): void;
   onAuthChange?(auth: AuthSession): void;
   onNavigate?(view: AppView): void;
   onConnectionChange?(connected: boolean): void;
 }) {
+  const inventoryRequests = useRequestGeneration();
+  const connectionEpoch = useRef(0);
   const [profileState, setProfileState] = useState(() => normalizeProfileState(profiles));
   const initialProfile = useMemo(
     () => profileState.profiles.find((item) => item.id === profileState.activeProfileId),
@@ -100,6 +101,7 @@ export function ServerAccessView({
   const [dataPlaneReason, setDataPlaneReason] = useState<DataPlaneStatusEvent["reason"]>();
   const [dataPlaneRetryable, setDataPlaneRetryable] = useState(false);
   const authenticated = authSession?.authenticated ?? auth.authenticated;
+  const previousAuth = useRef(authSession?.authenticated ?? false);
 
   useEffect(() => {
     const next = normalizeProfileState(profiles);
@@ -111,13 +113,17 @@ export function ServerAccessView({
   }, [onProfilesChange, profileState]);
 
   useEffect(() => {
-    if (management) return;
     onAuthChange?.(auth);
-  }, [auth, management, onAuthChange]);
+  }, [auth, onAuthChange]);
 
   useEffect(() => {
-    if (!authSession) return;
-    if (authSession.authenticated) return;
+    const wasAuthenticated = previousAuth.current;
+    previousAuth.current = authSession?.authenticated ?? false;
+    if (!authSession || authSession.authenticated || !wasAuthenticated) return;
+    connectionEpoch.current += 1;
+    inventoryRequests.invalidate();
+    setBusy(undefined);
+    setAuth(authSession);
     setInventory(undefined);
     setDataPlaneError("");
     setDataPlaneReason(undefined);
@@ -129,8 +135,9 @@ export function ServerAccessView({
   }, [authSession]);
 
   useEffect(() => {
-    if (management || !initialProfile) return;
+    if (!initialProfile) return;
     let active = true;
+    const epoch = connectionEpoch.current;
     setProfile(initialProfile);
     setAddress(initialProfile.baseUrl);
     setBusy("discover");
@@ -139,7 +146,7 @@ export function ServerAccessView({
       backend.serverAuthStatus(initialProfile.id),
     ])
       .then(async ([document, session]) => {
-        if (!active) return;
+        if (!active || epoch !== connectionEpoch.current) return;
         setDiscovery(document);
         setAuth(session);
         setProviderId(supportedAuthMethods(document.authMethods)[0]?.id ?? "");
@@ -148,7 +155,7 @@ export function ServerAccessView({
             initialProfile.id,
             initialProfile.lastNamespace ?? "",
           );
-          if (!active) return;
+          if (!active || epoch !== connectionEpoch.current) return;
           setInventory(remoteInventory);
           setBusy(undefined);
 
@@ -158,7 +165,7 @@ export function ServerAccessView({
             backend.listServerMirrors(initialProfile.id),
             backend.listServerPreviews(initialProfile.id),
           ]);
-          if (!active) return;
+          if (!active || epoch !== connectionEpoch.current) return;
           const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = sessionResources;
           if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
           if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
@@ -167,15 +174,15 @@ export function ServerAccessView({
         }
       })
       .catch((reason: unknown) => {
-        if (active) setError(messageOf(reason));
+        if (active && epoch === connectionEpoch.current) setError(messageOf(reason));
       })
       .finally(() => {
-        if (active) setBusy(undefined);
+        if (active && epoch === connectionEpoch.current) setBusy(undefined);
       });
     return () => {
       active = false;
     };
-  }, [initialProfile, management]);
+  }, [initialProfile]);
 
   useEffect(() => {
     const unsubscribe = window.runtime?.EventsOn("dataplane:status", (value: unknown) => {
@@ -204,7 +211,7 @@ export function ServerAccessView({
   useEffect(() => {
     const becameVisible = overviewVisible && !wasOverviewVisible.current;
     wasOverviewVisible.current = overviewVisible;
-    if (!becameVisible || management || !authenticated || !profile) return;
+    if (!becameVisible || !authenticated || !profile) return;
 
     let active = true;
     void Promise.allSettled([
@@ -220,7 +227,7 @@ export function ServerAccessView({
       if (remotePreviews.status === "fulfilled") setPreviews(remotePreviews.value);
     });
     return () => { active = false; };
-  }, [authenticated, management, overviewVisible, profile]);
+  }, [authenticated, overviewVisible, profile]);
 
   useEffect(() => () => {
     if (loginInFlight.current) {
@@ -437,6 +444,8 @@ export function ServerAccessView({
   }
 
   function clearWorkspaceState() {
+    connectionEpoch.current += 1;
+    inventoryRequests.invalidate();
     setAuth({ authenticated: false });
     setInventory(undefined);
     setDataPlaneError("");
@@ -481,6 +490,7 @@ export function ServerAccessView({
 
   async function loadInventory(namespace = inventory?.namespace ?? "") {
     if (!profile || busy) return;
+    const isCurrent = inventoryRequests.begin();
     setBusy("inventory");
     setError("");
     setDataPlaneError("");
@@ -488,6 +498,7 @@ export function ServerAccessView({
     setDataPlaneRetryable(false);
     try {
 	  const remoteInventory = await backend.loadServerInventory(profile.id, namespace);
+      if (!isCurrent()) return;
 	  setInventory(remoteInventory);
 	  const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.all([
 		backend.listServerPortForwards(profile.id),
@@ -495,6 +506,7 @@ export function ServerAccessView({
 		backend.listServerMirrors(profile.id),
 		backend.listServerPreviews(profile.id),
 	  ]);
+      if (!isCurrent()) return;
 	  setForwards(remoteForwards);
 	  setExchanges(remoteExchanges);
 	  setMirrors(remoteMirrors);
@@ -513,36 +525,41 @@ export function ServerAccessView({
 	  setSSHPod("");
 	  setSSHContainer("");
     } catch (reason) {
-      setError(messageOf(reason));
+      if (isCurrent()) setError(messageOf(reason));
     } finally {
-      setBusy(undefined);
+      if (isCurrent()) setBusy(undefined);
     }
   }
 
   async function connectDataPlane(mode: "socks" | "tun") {
     if (!profile || !inventory || inventory.dataPlane?.state === "connected" || busy) return;
+    const epoch = connectionEpoch.current;
     setBusy("tunnel");
     setError("");
     try {
+      // TUN startup owns helper readiness and installation; avoid forcing a second install here.
       const dataPlane = await backend.connectServerDataPlane(profile.id, mode);
+      if (epoch !== connectionEpoch.current) return;
       setInventory({ ...inventory, dataPlane });
       // The Data Plane connect restores local listeners for tasks that were
       // still running on the Gateway, so surface them in the session lists.
       await refreshSessionResources(profile.id);
     } catch (reason) {
-      setError(messageOf(reason));
+      if (epoch === connectionEpoch.current) setError(messageOf(reason));
     } finally {
-      setBusy(undefined);
+      if (epoch === connectionEpoch.current) setBusy(undefined);
     }
   }
 
   async function refreshSessionResources(profileId: string) {
+    const epoch = connectionEpoch.current;
     const [remoteForwards, remoteExchanges, remoteMirrors, remotePreviews] = await Promise.allSettled([
       backend.listServerPortForwards(profileId),
       backend.listServerExchanges(profileId),
       backend.listServerMirrors(profileId),
       backend.listServerPreviews(profileId),
     ]);
+    if (epoch !== connectionEpoch.current) return;
     if (remoteForwards.status === "fulfilled") setForwards(remoteForwards.value);
     if (remoteExchanges.status === "fulfilled") setExchanges(remoteExchanges.value);
     if (remoteMirrors.status === "fulfilled") setMirrors(remoteMirrors.value);
@@ -551,18 +568,20 @@ export function ServerAccessView({
 
   async function disconnectDataPlane() {
     if (!profile || !inventory?.dataPlane || inventory.dataPlane.state !== "connected" || busy) return;
+    const epoch = connectionEpoch.current;
     setBusy("tunnel");
     setError("");
     try {
       const dataPlane = await backend.disconnectServerDataPlane(profile.id);
+      if (epoch !== connectionEpoch.current) return;
       setInventory({ ...inventory, dataPlane });
       // The Data Plane disconnect releases the local listeners while the
       // gateway tasks stay running, so surface the released state locally.
       await refreshSessionResources(profile.id);
     } catch (reason) {
-      setError(messageOf(reason));
+      if (epoch === connectionEpoch.current) setError(messageOf(reason));
     } finally {
-      setBusy(undefined);
+      if (epoch === connectionEpoch.current) setBusy(undefined);
     }
   }
 
@@ -809,6 +828,53 @@ export function ServerAccessView({
       setBusy(undefined);
     }
   }
+  return {
+    onNavigate, profileState, profile, address, setAddress, discovery,
+    auth, inventory, exchangeService, setExchangeService, exchangePort,
+    setExchangePort, exchangeLocalHost, setExchangeLocalHost, exchangeLocalPort, setExchangeLocalPort,
+    mirrorService, setMirrorService, mirrorPort, setMirrorPort, mirrorLocalHost,
+    setMirrorLocalHost, mirrorLocalPort, setMirrorLocalPort, previewName, setPreviewName,
+    previewProtocol, setPreviewProtocol, previewServicePort, setPreviewServicePort, previewLocalHost,
+    setPreviewLocalHost, previewLocalPort, setPreviewLocalPort, sshPod, setSSHPod,
+    sshContainer, setSSHContainer, forwardKind, setForwardKind, forwardName,
+    setForwardName, forwardRemotePort, setForwardRemotePort, forwardLocalPort, setForwardLocalPort,
+    providerId, setProviderId, busy, loginCancelBusy, error,
+    setError, dataPlaneError, dataPlaneReason, dataPlaneRetryable, authenticated,
+    authMethods, selectedProvider, selectedSSHPod, selectedExchangeService, selectedExchangePort,
+    selectedMirrorService, selectedMirrorPort, discoverAndSave, login, cancelLogin,
+    logout, refreshLogin, selectProfile, addServer, removeProfile,
+    loadInventory, connectDataPlane, disconnectDataPlane, startPortForward, startExchange,
+    startMirror, startPreview, startPodSSH, addServerFromList, retestServer,
+    removeServerFromList, editServerFromList,
+  };
+}
+
+export type ServerConnection = ReturnType<typeof useServerConnection>;
+
+export function ServerAccessView({ connection, management = false }: {
+  connection: ServerConnection;
+  management?: boolean;
+}) {
+  const {
+    onNavigate, profileState, profile, address, setAddress, discovery,
+    auth, inventory, exchangeService, setExchangeService, exchangePort,
+    setExchangePort, exchangeLocalHost, setExchangeLocalHost, exchangeLocalPort, setExchangeLocalPort,
+    mirrorService, setMirrorService, mirrorPort, setMirrorPort, mirrorLocalHost,
+    setMirrorLocalHost, mirrorLocalPort, setMirrorLocalPort, previewName, setPreviewName,
+    previewProtocol, setPreviewProtocol, previewServicePort, setPreviewServicePort, previewLocalHost,
+    setPreviewLocalHost, previewLocalPort, setPreviewLocalPort, sshPod, setSSHPod,
+    sshContainer, setSSHContainer, forwardKind, setForwardKind, forwardName,
+    setForwardName, forwardRemotePort, setForwardRemotePort, forwardLocalPort, setForwardLocalPort,
+    providerId, setProviderId, busy, loginCancelBusy, error,
+    setError, dataPlaneError, dataPlaneReason, dataPlaneRetryable, authenticated,
+    authMethods, selectedProvider, selectedSSHPod, selectedExchangeService, selectedExchangePort,
+    selectedMirrorService, selectedMirrorPort, discoverAndSave, login, cancelLogin,
+    logout, refreshLogin, selectProfile, addServer, removeProfile,
+    loadInventory, connectDataPlane, disconnectDataPlane, startPortForward, startExchange,
+    startMirror, startPreview, startPodSSH, addServerFromList, retestServer,
+    removeServerFromList, editServerFromList,
+  } = connection;
+
 
   if (management) {
     return (
@@ -896,6 +962,7 @@ export function ServerAccessView({
         inventory={inventory}
         userName={auth.userName}
         busy={Boolean(busy)}
+        tunnelBusy={busy === "tunnel"}
         dataPlaneError={dataPlaneError}
         dataPlaneReason={dataPlaneReason}
         onRefresh={() => void loadInventory()}
@@ -1591,6 +1658,7 @@ export function ServerAccessView({
       </div>
     </main>
   );
+
 }
 
 function normalizeProfileState(state: ServerProfileState): ServerProfileState {

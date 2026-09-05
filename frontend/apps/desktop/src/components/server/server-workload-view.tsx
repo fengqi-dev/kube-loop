@@ -1,3 +1,6 @@
+import { useRequestGeneration } from "@/components/workspace/use-request-generation";
+import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
+import { resourceKey } from "@/components/workspace/workspace-model";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Circle, Network } from "lucide-react";
 import { toast } from "sonner";
@@ -18,8 +21,10 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { RemoteInventory, RemotePod, ServerInventoryEvent, ServerPodSSHInfo, ServerPortForwardInfo } from "@/types";
 
-export function ServerWorkloadView({ profileId }: { profileId: string }) {
+export function ServerWorkloadView({ profileId, active = true, selectedNamespace, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; onNamespaceChange?(namespace: string): void }) {
   const { t } = useI18n();
+  const workspace = useResourceWorkspace();
+  const requests = useRequestGeneration();
   const [inventory, setInventory] = useState<RemoteInventory>();
   const [namespace, setNamespace] = useState("");
   const [query, setQuery] = useState("");
@@ -37,7 +42,9 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
   const [forwards, setForwards] = useState<ServerPortForwardInfo[]>([]);
 
   const reload = useCallback(async (nextNamespace = namespace) => {
+    const isCurrent = requests.begin();
     if (!profileId) {
+      if (!isCurrent()) return;
       setInventory(undefined);
       setLoading(false);
       return;
@@ -48,12 +55,14 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         profileId,
         nextNamespace === ALL_NAMESPACES ? "" : nextNamespace,
       );
+      if (!isCurrent()) return;
       setInventory({ ...next, pods: (next.pods ?? []).map((pod) => ({ ...pod, ports: pod.ports ?? [] })) });
       setNamespace(next.namespace ?? "");
       const [endpoints, activeForwards] = await Promise.allSettled([
         backend.listServerPodSSH(profileId),
         backend.listServerPortForwards(profileId),
       ]);
+      if (!isCurrent()) return;
       if (endpoints.status === "fulfilled") setSSHEndpoints(endpoints.value);
       if (activeForwards.status === "fulfilled") {
         setForwards(activeForwards.value.filter((item) => item.kind === "pod"));
@@ -63,17 +72,19 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         .map((result) => messageOf(result.reason));
       setError(failures.join("\n"));
     } catch (reason) {
+      if (!isCurrent()) return;
       setError(messageOf(reason));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [namespace, profileId]);
 
   useEffect(() => {
-    void reload("");
-    // Reload only when the selected Server changes.
+    if (active) void reload(selectedNamespace ?? namespace);
+    else requests.invalidate();
+    // Revalidate the retained namespace before its actions become available.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId]);
+  }, [profileId, active, selectedNamespace]);
 
   useEffect(() => {
     const unsubscribe = window.runtime?.EventsOn("server-inventory:snapshot", (value: unknown) => {
@@ -83,7 +94,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         ? { ...current, pods: event.snapshot!.pods!.map((pod) => ({ ...pod, ports: pod.ports ?? [] })) }
         : current);
     });
-    return () => unsubscribe?.();
+  return () => unsubscribe?.();
   }, [profileId]);
 
   const namespaces = useMemo(() => (inventory?.namespaces ?? []).map((item) => item.name), [inventory?.namespaces]);
@@ -151,12 +162,31 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
   const canFiles = inventory?.capabilities.includes("pods.files") ?? false;
   const canManageFiles = inventory?.capabilities.includes("pods.files.manage") ?? false;
 
+    function renderActions(pod: RemotePod) {
+    return                       <div className="flex items-center gap-1">
+                        <ActionIconButton label={t("network.tabPortForward")} icon={portForwardIcon} disabled={!ready || !canForward || forwards.some((entry) => entry.name === pod.name && entry.namespace === pod.namespace)} onClick={() => { const port = pod.ports?.[0]; setSelected(pod); setRemotePort(port ? String(port.port) : ""); setProtocol(port?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"); setDialogOpen(true); }} />
+                        <ActionIconButton label={t("sftp.openManager")} icon={sftpIcon} disabled={!ready || (!canFiles && !canManageFiles)} onClick={() => { setSelected(pod); setSFTPOpen(true); }} />
+                        {pod.containers.map((container) => (
+                          <ActionIconButton key={container} label={`${t("workload.openSSH")} · ${container}`} icon={sshIcon} text={pod.containers.length > 1 ? container : undefined} disabled={!ready || !pod.ready || !canExec || busy} onClick={() => void openSSH(pod, container)} />
+                        ))}
+                      </div>;
+  }
+  const workspaceResources = (inventory?.pods ?? []).map(pod => ({
+    key: resourceKey({ profileId, namespace: pod.namespace, kind: "pod", id: pod.name }),
+    label: pod.name, namespace: pod.namespace,
+    fields: [
+      [t("network.colNamespace"), pod.namespace], [t("workspace.state"), pod.phase],
+      [t("network.colIP"), pod.podIp], [t("network.colNode"), pod.nodeName],
+      [t("workspace.containers"), pod.containers.join(", ")],
+      [t("network.colPorts"), pod.ports.map(port => `${port.protocol}/${port.port}`).join(", ")],
+    ] as Array<[string, React.ReactNode]>, actions: renderActions(pod),
+  }));
   return (
     <PageShell title={t("workload.title")} description={t("workload.description")}>
       <ResourceToolbar
         namespaces={namespaces}
         namespace={namespace}
-        onNamespaceChange={(value) => { setNamespace(value); void reload(value); }}
+        onNamespaceChange={(value) => { if (onNamespaceChange) onNamespaceChange(value); else { setNamespace(value); void reload(value); } }}
         query={query}
         onQueryChange={setQuery}
         searchPlaceholder={t("workload.search")}
@@ -168,6 +198,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         namespacePlaceholder={loading ? t("overview.loadingKubeconfig") : undefined}
       />
 
+      <ResourceWorkspace namespace={inventory?.namespace} workspace={workspace} resources={workspaceResources} settled={!loading && !error}>
       {!profileId ? (
         <EmptyState icon={Network} title={t("network.waitingTitle")} detail={t("network.selectContext")} />
       ) : (
@@ -199,7 +230,9 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
                 </TableRow>
               ) : (
                 visiblePods.map((pod) => (
-                  <TableRow key={`${pod.namespace}/${pod.name}`}>
+                  <TableRow key={`${pod.namespace}/${pod.name}`} data-state={workspace.state.active === resourceKey({ profileId, namespace: pod.namespace, kind: "pod", id: pod.name }) ? "selected" : undefined}
+                    tabIndex={0} className="cursor-pointer" onClick={(event) => { if (!(event.target as HTMLElement).closest("button, a")) workspace.open(workspaceResources.find(item => item.label === pod.name && item.namespace === pod.namespace)!); }}
+                    onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") workspace.open(workspaceResources.find(item => item.label === pod.name && item.namespace === pod.namespace)!); }}>
                     <TableCell className="w-40 min-w-40 max-w-40 font-medium"><span className="block truncate" title={pod.name}>{pod.name}</span></TableCell>
                     <TableCell className="text-primary">{pod.namespace}</TableCell>
                     <TableCell className="font-mono text-[12px]"><CopyableText value={pod.podIp} /></TableCell>
@@ -223,13 +256,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
                       ) : "—"}
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-1">
-                        <ActionIconButton label={t("network.tabPortForward")} icon={portForwardIcon} disabled={!ready || !canForward || forwards.some((entry) => entry.name === pod.name && entry.namespace === pod.namespace)} onClick={() => { const port = pod.ports?.[0]; setSelected(pod); setRemotePort(port ? String(port.port) : ""); setProtocol(port?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"); setDialogOpen(true); }} />
-                        <ActionIconButton label={t("sftp.openManager")} icon={sftpIcon} disabled={!ready || (!canFiles && !canManageFiles)} onClick={() => { setSelected(pod); setSFTPOpen(true); }} />
-                        {pod.containers.map((container) => (
-                          <ActionIconButton key={container} label={`${t("workload.openSSH")} · ${container}`} icon={sshIcon} text={pod.containers.length > 1 ? container : undefined} disabled={!ready || !pod.ready || !canExec || busy} onClick={() => void openSSH(pod, container)} />
-                        ))}
-                      </div>
+{renderActions(pod)}
                     </TableCell>
                   </TableRow>
                 ))
@@ -240,7 +267,7 @@ export function ServerWorkloadView({ profileId }: { profileId: string }) {
         </div>
       )}
 
-      {profileId ? null : null}
+      </ResourceWorkspace>
 
       <SFTPFileManagerDialog
         open={sftpOpen}

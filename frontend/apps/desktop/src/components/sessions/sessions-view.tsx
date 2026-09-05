@@ -1,3 +1,6 @@
+import { useRequestGeneration } from "@/components/workspace/use-request-generation";
+import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
+import { resourceKey } from "@/components/workspace/workspace-model";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUpDown, Copy, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
 import { backend } from "@/backend";
@@ -29,10 +32,12 @@ import type {
 } from "@/types";
 
 type Action = "port-forward" | "exchange" | "mirror" | "preview";
-type SessionRow = { key: string; id: string; kind: Action; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean };
+type SessionRow = { namespace: string; key: string; id: string; kind: Action; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean };
 
-export function SessionsView({ profileId }: { profileId: string }) {
+export function SessionsView({ profileId, active = true, selectedNamespace, onNamespaceChange }: { profileId: string; active?: boolean; selectedNamespace?: string; onNamespaceChange?(namespace: string): void }) {
   const { t } = useI18n();
+  const workspace = useResourceWorkspace();
+  const requests = useRequestGeneration();
   const [inventory, setInventory] = useState<RemoteInventory>();
   const [sessions, setSessions] = useState<ServerTrafficBindingSession[]>([]);
   const [portForwards, setPortForwards] = useState<ServerPortForwardInfo[]>([]);
@@ -47,7 +52,9 @@ export function SessionsView({ profileId }: { profileId: string }) {
   const [error, setError] = useState("");
 
   const load = useCallback(async (nextNamespace: string) => {
+    const isCurrent = requests.begin();
     if (!profileId) {
+      if (!isCurrent()) return;
       setInventory(undefined);
       setLoading(false);
       return;
@@ -55,6 +62,7 @@ export function SessionsView({ profileId }: { profileId: string }) {
     setLoading(true);
     try {
       const next = await backend.loadServerInventory(profileId, nextNamespace);
+      if (!isCurrent()) return;
       setInventory(next);
       setNamespace(next.namespace ?? "");
       const results = await Promise.allSettled([
@@ -64,6 +72,7 @@ export function SessionsView({ profileId }: { profileId: string }) {
         backend.listServerMirrors(profileId),
         backend.listServerPreviews(profileId),
       ]);
+      if (!isCurrent()) return;
       if (results[0].status === "fulfilled") setSessions(results[0].value);
       if (results[1].status === "fulfilled") setPortForwards(results[1].value);
       if (results[2].status === "fulfilled") setExchanges(results[2].value);
@@ -74,19 +83,20 @@ export function SessionsView({ profileId }: { profileId: string }) {
         .map((result) => messageOf(result.reason))
         .join("\n"));
     } catch (reason) {
+      if (!isCurrent()) return;
       setError(messageOf(reason));
     } finally {
-      setLoading(false);
+      if (isCurrent()) setLoading(false);
     }
   }, [profileId]);
 
   useEffect(() => {
-    setInventory(undefined);
-    setNamespace("");
-    void load("");
-  }, [load]);
+    if (active) void load(selectedNamespace ?? namespace);
+    else requests.invalidate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [load, active, selectedNamespace]);
 
-  const rows = useMemo(() => {
+  const allRows = useMemo(() => {
     const localPortForwards = new Map(portForwards.map((item) => [item.id, item]));
     const localIDs = new Set([
       ...portForwards.map((item) => item.id),
@@ -103,11 +113,10 @@ export function SessionsView({ profileId }: { profileId: string }) {
       ...mirrors.filter((item) => !remoteIDs.has(item.id)).map((item) => localTargetRow("mirror", item)),
       ...previews.filter((item) => !remoteIDs.has(item.id)).map(previewRow),
     );
-    const normalized = query.trim().toLocaleLowerCase();
-    return normalized
-      ? list.filter((row) => [labelFor(row.kind), row.targetType, row.target, row.details.flatMap((detail) => [detail.local, detail.remote]).join(" "), row.state].some((value) => String(value).toLocaleLowerCase().includes(normalized)))
-      : list;
-  }, [exchanges, mirrors, portForwards, previews, sessions, query]);
+    return list;
+  }, [exchanges, mirrors, portForwards, previews, sessions]);
+  const normalized = query.trim().toLocaleLowerCase();
+  const rows = allRows.filter(row => !normalized || [labelFor(row.kind), row.targetType, row.target, row.details.flatMap(detail => [detail.local, detail.remote]).join(" "), row.state].some(value => String(value).toLocaleLowerCase().includes(normalized)));
 
   const pageCount = Math.max(1, Math.ceil(rows.length / RESOURCE_PAGE_SIZE));
   const visibleRows = rows.slice((page - 1) * RESOURCE_PAGE_SIZE, page * RESOURCE_PAGE_SIZE);
@@ -175,10 +184,19 @@ export function SessionsView({ profileId }: { profileId: string }) {
     }
   }
 
+  const workspaceResources = allRows.map(row => ({
+    key: resourceKey({ profileId, namespace: row.namespace, kind: row.kind, id: row.id }), label: row.target, namespace: row.namespace,
+    fields: [[t("workspace.type"), labelFor(row.kind)], [t("workspace.target"), row.target], [t("workspace.state"), row.state],
+      [t("workspace.mapping"), row.details.map(detail => `${detail.local} ↔ ${detail.remote}`).join("\n")]] as Array<[string, React.ReactNode]>,
+    actions: <>
+      <ActionIconButton label={row.state === "paused" || row.state === "stopped" ? "Resume" : "Pause"} icon={row.state === "paused" || row.state === "stopped" ? Play : Pause} disabled={busyTasks.has(row.key)} onClick={() => void mutateTask(row.state === "paused" || row.state === "stopped" ? "resume" : "pause", row.kind, row.id, row.managedLocally)} />
+      <ActionIconButton label="Delete" icon={Trash2} disabled={busyTasks.has(row.key)} onClick={() => void mutateTask("delete", row.kind, row.id, row.managedLocally)} />
+    </>,
+  }));
   return (
     <PageShell title={t("nav.sessions")} description={t("header.sessions")}>
-      <div className="mb-4 flex flex-nowrap items-center gap-2">
-        <select className="h-9 w-[180px] shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={namespace} disabled={!inventory || loading} onChange={(event) => void load(event.target.value)}>
+      <div className="resource-toolbar">
+        <select className="h-9 w-[180px] shrink-0 rounded-md border border-input bg-background px-3 text-sm" value={namespace} disabled={!inventory || loading} onChange={(event) => onNamespaceChange ? onNamespaceChange(event.target.value) : void load(event.target.value)}>
           {!inventory ? <option value="" disabled>Loading…</option> : null}
           {(inventory?.namespaces ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select>
@@ -186,6 +204,7 @@ export function SessionsView({ profileId }: { profileId: string }) {
         <Button className="shrink-0 whitespace-nowrap" type="button" variant="outline" size="sm" disabled={!profileId || loading} onClick={() => void load(namespace)}>{loading ? <Spinner data-icon="inline-start" /> : <RefreshCw size={14} />}Refresh</Button>
       </div>
 
+      <ResourceWorkspace workspace={workspace} resources={workspaceResources} settled={!loading && !error}>
       {!profileId || (!inventory && !loading) ? <p className="rounded-md border bg-card p-8 text-center text-sm text-muted-foreground">Select and sign in to a Server first.</p> : <div className="space-y-5">
         {error && !loading ? <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
 
@@ -207,21 +226,24 @@ export function SessionsView({ profileId }: { profileId: string }) {
               ) : rows.length === 0 ? (
                 <TableRow className="hover:bg-transparent"><TableCell colSpan={6} className="h-32 text-center text-[12px] text-muted-foreground">No active sessions.</TableCell></TableRow>
               ) : (
-                visibleRows.map((row) => <OperationRow key={row.key} kind={row.kind} id={row.id} targetType={row.targetType} target={row.target} details={row.details} state={row.state} managedLocally={row.managedLocally} busy={busyTasks.has(row.key)} onMutate={mutateTask} />)
+                visibleRows.map((row) => <OperationRow key={row.key} selected={workspace.state.active === resourceKey({ profileId, namespace: row.namespace, kind: row.kind, id: row.id })} onSelect={() => workspace.open(workspaceResources.find(item => item.key === resourceKey({ profileId, namespace: row.namespace, kind: row.kind, id: row.id }))!)} kind={row.kind} id={row.id} targetType={row.targetType} target={row.target} details={row.details} state={row.state} managedLocally={row.managedLocally} busy={busyTasks.has(row.key)} onMutate={mutateTask} />)
               )}
             </TableBody>
           </Table>
           <ResourcePagination page={page} total={rows.length} showWhenEmpty onPageChange={setPage} />
         </div>
       </div>}
+      </ResourceWorkspace>
     </PageShell>
   );
 }
 
-function OperationRow({ kind, id, targetType, target, details, state, managedLocally, busy, onMutate }: { kind: Action; id: string; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string, managedLocally: boolean): void }) {
+function OperationRow({ onSelect, selected, kind, id, targetType, target, details, state, managedLocally, busy, onMutate }: { onSelect?(): void; selected?: boolean; kind: Action; id: string; targetType: SessionTargetType; target: string; details: TrafficEndpointPair[]; state: string; managedLocally: boolean; busy: boolean; onMutate(operation: "pause" | "resume" | "delete", kind: Action, id: string, managedLocally: boolean): void }) {
   const paused = state === "paused" || state === "stopped";
   return (
-    <TableRow>
+    <TableRow data-state={selected ? "selected" : undefined} tabIndex={0} className="cursor-pointer"
+      onClick={event => { if (!(event.target as HTMLElement).closest("button, a")) onSelect?.(); }}
+      onKeyDown={event => { if (event.target === event.currentTarget && event.key === "Enter") onSelect?.(); }}>
       <TableCell><Badge variant="outline">{labelFor(kind)}</Badge></TableCell>
       <TableCell>{targetType}</TableCell>
       <TableCell>{target}</TableCell>
@@ -276,6 +298,7 @@ function sessionRow(item: ServerTrafficBindingSession, localPortForward: ServerP
       : item.target?.name ?? item.serviceName ?? item.name;
   return {
     key: `${kind}:${item.id}`,
+    namespace: item.namespace,
     id: item.id,
     kind,
     targetType: sessionTargetType(item, localPortForward),
@@ -289,6 +312,7 @@ function sessionRow(item: ServerTrafficBindingSession, localPortForward: ServerP
 function portForwardRow(item: ServerPortForwardInfo): SessionRow {
   return {
     key: `port-forward:${item.id}`,
+    namespace: item.namespace,
     id: item.id,
     kind: "port-forward",
     targetType: targetTypeLabel(item.kind),
@@ -302,6 +326,7 @@ function portForwardRow(item: ServerPortForwardInfo): SessionRow {
 function localTargetRow(kind: "exchange" | "mirror", item: ServerExchangeInfo | ServerMirrorInfo): SessionRow {
   return {
     key: `${kind}:${item.id}`,
+    namespace: item.namespace,
     id: item.id,
     kind,
     targetType: "Service",
@@ -315,6 +340,7 @@ function localTargetRow(kind: "exchange" | "mirror", item: ServerExchangeInfo | 
 function previewRow(item: ServerPreviewInfo): SessionRow {
   return {
     key: `preview:${item.id}`,
+    namespace: item.namespace,
     id: item.id,
     kind: "preview",
     targetType: "Service",

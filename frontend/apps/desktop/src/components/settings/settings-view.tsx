@@ -213,10 +213,10 @@ export function SettingsView({
 
   return (
     <PageShell title={t("settings.title")} description={t("settings.description")}>
-      <Card className="mb-5 gap-0 py-0 shadow-none">
-        <CardContent className="flex items-center justify-between gap-6 p-5">
+      <Card className="mb-2 gap-0 py-0 shadow-none">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
           <div>
-            <h3 className="text-[13px] font-semibold">{t("settings.theme")}</h3>
+            <h3 id="settings-theme" className="text-[13px] font-semibold">{t("settings.theme")}</h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("settings.themeDescription")}
             </p>
@@ -250,10 +250,10 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card className="mb-5 gap-0 py-0 shadow-none">
-        <CardContent className="flex items-center justify-between gap-6 p-5">
+      <Card className="mb-2 gap-0 py-0 shadow-none">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
           <div>
-            <h3 className="text-[13px] font-semibold">{t("settings.language")}</h3>
+            <h3 id="settings-language" className="text-[13px] font-semibold">{t("settings.language")}</h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("settings.languageDescription")}
             </p>
@@ -272,10 +272,10 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card className="mb-5 gap-0 py-0 shadow-none">
-        <CardContent className="flex items-center justify-between gap-6 p-5">
+      <Card className="mb-2 gap-0 py-0 shadow-none">
+        <CardContent className="flex flex-wrap items-center justify-between gap-3 p-3">
           <div>
-            <h3 className="text-[13px] font-semibold">{t("settings.logLevel")}</h3>
+            <h3 id="settings-logLevel" className="text-[13px] font-semibold">{t("settings.logLevel")}</h3>
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("settings.logLevelDescription")}
             </p>
@@ -296,12 +296,12 @@ export function SettingsView({
         </CardContent>
       </Card>
 
-      <Card className="mb-5 gap-0 py-0 shadow-none">
-        <CardContent className="flex items-start justify-between gap-6 p-5">
+      <Card className="mb-2 gap-0 py-0 shadow-none">
+        <CardContent className="flex flex-wrap items-start justify-between gap-3 p-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <ShieldCheck size={15} className="text-muted-foreground" />
-              <h3 className="text-[13px] font-semibold">{t("settings.networkRuntimeTitle")}</h3>
+              <h3 id="settings-networkRuntimeTitle" className="text-[13px] font-semibold">{t("settings.networkRuntimeTitle")}</h3>
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
               {t("settings.networkRuntimeDescription")}
@@ -407,7 +407,7 @@ export function SettingsView({
 
       <div className="mb-3 flex items-end justify-between gap-4">
         <div>
-          <h3 className="text-[13px] font-semibold">{t("settings.updateTitle")}</h3>
+          <h3 id="settings-updateTitle" className="text-[13px] font-semibold">{t("settings.updateTitle")}</h3>
           <p className="mt-1 text-[11px] text-muted-foreground">{t("settings.updateDescription")}</p>
         </div>
         <Button type="button" variant="outline" size="sm" disabled={checking} onClick={onCheck}>
@@ -417,7 +417,7 @@ export function SettingsView({
       </div>
 
       <Card className="gap-0 overflow-hidden py-0 shadow-none">
-        <CardContent className="flex items-start justify-between gap-6 p-6">
+        <CardContent className="flex flex-wrap items-start justify-between gap-3 p-6">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
               <div className="grid size-11 place-items-center rounded-md border border-primary/20 bg-primary/10 text-primary">

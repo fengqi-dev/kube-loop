@@ -227,8 +227,8 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
   return (
     <PageShell title={t("mcp.title")} description={t("mcp.description")}>
       <Card className="gap-0 py-0 shadow-none">
-        <CardContent className="space-y-4 p-5">
-          <div className="flex items-start justify-between gap-6">
+        <CardContent className="space-y-3 p-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h3 className="text-[13px] font-semibold">{t("mcp.serverTitle")}</h3>
@@ -324,7 +324,7 @@ Authorization = ${JSON.stringify(`Bearer ${token}`)}
             </div>
           </div>
 
-          <div className="flex items-start justify-between gap-6 rounded-md border border-border/70 px-3 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border/70 px-3 py-3">
             <div className="min-w-0">
               <h4 className="text-[12px] font-semibold">{t("mcp.tokenAuth")}</h4>
               <p className="mt-1 text-[11px] text-muted-foreground">{t("mcp.tokenAuthDescription")}</p>

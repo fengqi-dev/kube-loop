@@ -1,3 +1,4 @@
+import { ToolbarActions } from "@/components/workspace/toolbar-actions";
 import { RefreshCw, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,7 +47,7 @@ export function ResourceToolbar({
   const { t } = useI18n();
 
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-2">
+    <div className="resource-toolbar">
       <Select value={namespace || undefined} onValueChange={onNamespaceChange} disabled={disabled || loading}>
         <SelectTrigger className="h-8 w-[180px]">
           <SelectValue placeholder={namespacePlaceholder ?? (loading ? t("overview.loadingKubeconfig") : undefined)} />
@@ -63,7 +64,7 @@ export function ResourceToolbar({
         </SelectContent>
       </Select>
 
-      <div className="relative min-w-[220px] flex-1">
+      <div className="relative min-w-0 basis-40 flex-1">
         <Search
           size={14}
           className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground"
@@ -96,7 +97,7 @@ export function ResourceToolbar({
         {t("network.refresh")}
       </Button>
 
-      {actions}
+      {actions ? <ToolbarActions>{actions}</ToolbarActions> : null}
     </div>
   );
 }

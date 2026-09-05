@@ -12,14 +12,14 @@ export function PageShell({
   children: ReactNode;
 }) {
   return (
-    <div className="mx-auto max-w-[1080px]">
-      <div className="mb-6 flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-[16px] font-bold tracking-tight">{title}</h2>
-          <p className="mt-1 text-[12px] text-muted-foreground">{description}</p>
+    <div className="page-shell flex min-h-0 min-w-0 flex-1 flex-col">
+      <header className="page-heading" data-has-action={Boolean(action)}>
+        <div className="page-heading-copy">
+          <h2>{title}</h2>
+          <p>{description}</p>
         </div>
         {action}
-      </div>
+      </header>
       {children}
     </div>
   );

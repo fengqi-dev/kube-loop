@@ -1,3 +1,6 @@
+import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
+import { resourceKey } from "@/components/workspace/workspace-model";
+import { useI18n } from "@/i18n";
 import { useState } from "react";
 import { CheckCircle2, Pencil, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -44,6 +47,8 @@ export function ServerListView({
   onEdit(profile: ServerProfile, displayName: string, address: string): Promise<void>;
   onRemove(id: string): Promise<void>;
 }) {
+  const { t } = useI18n();
+  const workspace = useResourceWorkspace();
   const [addOpen, setAddOpen] = useState(false);
   const [address, setAddress] = useState("");
   const [removeTarget, setRemoveTarget] = useState<ServerProfile>();
@@ -99,6 +104,15 @@ export function ServerListView({
     }
   }
 
+  const workspaceResources = profiles.map(item => ({
+    key: resourceKey({ profileId: item.id, namespace: "", kind: "server", id: item.id }), label: item.displayName || item.id, namespace: "",
+    fields: [[t("workspace.address"), item.baseUrl], [t("workspace.identity"), item.lastUserName], [t("network.colNamespace"), item.lastNamespace]] as Array<[string, React.ReactNode]>,
+    actions: <>
+      <Button variant="outline" size="sm" disabled={busy || item.id === activeProfileId} onClick={() => void onSelect(item.id)}>{t("workspace.useServer")}</Button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => openEdit(item)}>{t("workspace.edit")}</Button>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={() => void retest(item)}>{t("network.refresh")}</Button>
+    </>,
+  }));
   return (
     <PageShell
       title="Servers"
@@ -110,6 +124,7 @@ export function ServerListView({
         </Button>
       )}
     >
+      <ResourceWorkspace workspace={workspace} resources={workspaceResources} settled={!busy}>
       {profiles.length === 0 ? (
         <EmptyState icon={Server} title="No Servers" detail="Add the Gateway service address provided by your administrator." />
       ) : (
@@ -131,7 +146,7 @@ export function ServerListView({
                   <TableRow
                     key={profile.id}
                     className={cn("cursor-pointer", active && "bg-muted/50")}
-                    onClick={() => void onSelect(profile.id)}
+                    onClick={() => workspace.open(workspaceResources.find(item => item.key === resourceKey({ profileId: profile.id, namespace: "", kind: "server", id: profile.id }))!)}
                   >
                     <TableCell className="font-medium">
                       <div className="flex items-center gap-2">
@@ -206,6 +221,7 @@ export function ServerListView({
 
       {error ? <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p> : null}
 
+      </ResourceWorkspace>
       <Dialog open={addOpen} onOpenChange={(open) => !busy && setAddOpen(open)}>
         <DialogContent showCloseButton={!busy}>
           <DialogHeader>
