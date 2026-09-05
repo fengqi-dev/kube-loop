@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestGenerateClientTrojanConfigUsesSingleWebSocketConnection(t *testing.T) {
+func TestGenerateClientTrojanConfigUsesBoundedWebSocketConnections(t *testing.T) {
 	t.Parallel()
 
 	raw, err := GenerateClientTrojanConfig(ClientTrojanOptions{
@@ -33,7 +33,8 @@ func TestGenerateClientTrojanConfigUsesSingleWebSocketConnection(t *testing.T) {
 		t.Fatalf("unexpected WebSocket transport: %#v", transport)
 	}
 	multiplex := outbound["multiplex"].(map[string]any)
-	if multiplex["max_connections"] != float64(1) || multiplex["enabled"] != true {
+	if multiplex["max_connections"] != float64(2) || multiplex["enabled"] != true ||
+		multiplex["protocol"] != "smux" {
 		t.Fatalf("unexpected multiplex config: %#v", multiplex)
 	}
 }

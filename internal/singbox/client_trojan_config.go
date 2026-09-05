@@ -68,7 +68,7 @@ func GenerateClientTrojanConfig(options ClientTrojanOptions) ([]byte, error) {
 		"server": endpoint.Hostname(), "server_port": port,
 		configPasswordKey: options.TrojanPassword,
 		"multiplex": map[string]any{
-			configEnabledKey: true, "protocol": "smux", "max_connections": 1,
+			configEnabledKey: true, "protocol": "smux", "max_connections": 2,
 		},
 		"transport": map[string]any{
 			"type": "ws", "path": endpoint.EscapedPath(),
