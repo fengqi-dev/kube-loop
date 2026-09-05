@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/helperinstall"
@@ -57,11 +58,14 @@ func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Run
 	runtime.PrivilegedStart = func(
 		ctx context.Context, spec sessionspec.Spec,
 	) (func(context.Context) error, error) {
+		started := time.Now()
 		info("ensuring privileged helper is ready")
 		if err := helperinstall.EnsureInstall(ctx); err != nil {
 			errLog("ensure privileged helper: " + err.Error())
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
 		}
+		info("privileged helper ready", "elapsed", time.Since(started))
+		started = time.Now()
 		client, err := helper.NewClient()
 		if err != nil {
 			errLog("helper client: " + err.Error())
@@ -91,7 +95,7 @@ func NewSingboxRuntime(logger *slog.Logger, logLevel string) *singboxruntime.Run
 				return nil, fmt.Errorf("helper start session: %w", err)
 			}
 		}
-		info("privileged TUN session started")
+		info("privileged TUN session started", "elapsed", time.Since(started))
 		return func(stopCtx context.Context) error {
 			_, err := client.Stop(stopCtx, spec.ID)
 			return err

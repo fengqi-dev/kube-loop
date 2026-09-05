@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -144,6 +145,10 @@ func (a *App) HelperStatus() helper.Status {
 }
 
 func (a *App) InstallHelper() error {
+	started := time.Now()
+	defer func() {
+		a.logInfo(fmt.Sprintf("privileged helper install finished: elapsed=%s", time.Since(started)))
+	}()
 	a.logInfo("installing privileged helper")
 	if err := helperinstall.EnsureCurrentInstall(a.context()); err != nil {
 		a.logError(fmt.Sprintf("install privileged helper: %v", err))

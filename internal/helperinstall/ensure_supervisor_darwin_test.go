@@ -74,7 +74,8 @@ func TestCanUpdateWorkerThroughSupervisor(t *testing.T) {
 			},
 		},
 		{
-			name: "worker is not reachable",
+			name: "installed stopped worker can recover without elevation",
+			want: true,
 			status: supervisor.Response{
 				Protocol: supervisor.Version,
 				Channel:  "dev",

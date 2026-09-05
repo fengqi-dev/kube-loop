@@ -50,6 +50,10 @@ func installCurrentHelper(
 	cancel()
 	if installedCoreMatches(singBox, helper.CoreInstallPath()) &&
 		canUpdateWorkerThroughSupervisor(status, statusErr, config.Channel, installedSupervisorSHA, supervisorSHA) {
+		if status.Worker.SHA256 == sourceSHA256 && !status.Worker.Running {
+			_, err := client.RestartWorker(ctx)
+			return err
+		}
 		if status.Worker.SHA256 == sourceSHA256 && status.Worker.Version == helper.Version &&
 			status.Worker.Protocol == helperrpc.Version && status.Worker.CoreReady {
 			return nil
@@ -94,6 +98,5 @@ func canUpdateWorkerThroughSupervisor(
 		status.Protocol == supervisorproto.Version &&
 		status.Channel == channel &&
 		installedSupervisorSHA == bundledSupervisorSHA &&
-		status.Worker.Installed &&
-		status.Worker.Running
+		status.Worker.Installed
 }
