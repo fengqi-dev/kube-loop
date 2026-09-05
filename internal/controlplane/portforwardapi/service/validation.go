@@ -131,7 +131,7 @@ func stateFromBinding(binding *trafficv1alpha1.TrafficBinding) remotetask.State 
 func mapStorageError(err error) *controlplaneapi.Error {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
-		return notFound()
+		return controlplaneapi.NotFound()
 	case errors.Is(err, storage.ErrConflict),
 		errors.Is(err, trafficbindingclient.ErrTrafficBindingConflict):
 		return &controlplaneapi.Error{
@@ -157,5 +157,3 @@ func internalError(err error) *controlplaneapi.Error {
 		Cause:   err,
 	}
 }
-
-func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }

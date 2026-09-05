@@ -19,8 +19,8 @@ type RuntimeReporter interface {
 }
 
 type ControlApplier interface {
-	Apply(string, string, relaycontrol.VerificationKeySet, relaycontrol.RevocationSummary) error
-	AppliedGenerations() (uint64, uint64)
+	Apply(string, string, relaycontrol.VerificationKeySet) error
+	AppliedKeyGeneration() uint64
 }
 
 type Config struct {

@@ -3,6 +3,7 @@ package remote
 import (
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -68,16 +69,9 @@ func validateTargetsAgainstPorts(ports []servicePortValue, targets []LocalTarget
 		return err
 	}
 	for _, port := range ports {
-		key := strconv.Itoa(int(port.servicePort)) + "/" + port.protocol
-		found := false
-		for _, target := range targets {
-			targetKey := strconv.Itoa(int(target.ServicePort)) + "/" + strings.ToLower(target.Protocol)
-			if targetKey == key {
-				found = true
-				break
-			}
-		}
-		if !found {
+		if !slices.ContainsFunc(targets, func(target LocalTarget) bool {
+			return target.ServicePort == port.servicePort && target.Protocol == port.protocol
+		}) {
 			return errors.New("local targets must match service ports")
 		}
 	}
@@ -133,20 +127,13 @@ func validateExchangeTask(task ExchangeTask, session Session) (ExchangeTask, err
 	spec := ExchangeSpec{
 		Service:      task.Service,
 		Ports:        append([]ExchangePort(nil), task.Ports...),
-		LocalTargets: cloneLocalTargets(task.LocalTargets),
+		LocalTargets: append([]LocalTarget(nil), task.LocalTargets...),
 	}
 	if err := validateExchangeSpec(&spec); err != nil {
 		return ExchangeTask{}, errors.New("gateway returned an invalid Exchange Task")
 	}
 	task.Service, task.Ports, task.LocalTargets = spec.Service, spec.Ports, spec.LocalTargets
 	return task, nil
-}
-
-func cloneLocalTargets(targets []LocalTarget) []LocalTarget {
-	if len(targets) == 0 {
-		return nil
-	}
-	return append([]LocalTarget(nil), targets...)
 }
 
 func validateMirrorSpec(spec *MirrorSpec) error {
@@ -175,7 +162,7 @@ func validateMirrorTask(task MirrorTask, session Session) (MirrorTask, error) {
 	spec := MirrorSpec{
 		Service:      task.Service,
 		Ports:        append([]MirrorPort(nil), task.Ports...),
-		LocalTargets: cloneLocalTargets(task.LocalTargets),
+		LocalTargets: append([]LocalTarget(nil), task.LocalTargets...),
 	}
 	if err := validateMirrorSpec(&spec); err != nil {
 		return MirrorTask{}, errors.New("gateway returned an invalid Mirror Task")
@@ -229,7 +216,7 @@ func validatePreviewTask(task PreviewTask, session Session) (PreviewTask, error)
 	spec := PreviewSpec{
 		Name:         task.Name,
 		Ports:        append([]PreviewPort(nil), task.Ports...),
-		LocalTargets: cloneLocalTargets(task.LocalTargets),
+		LocalTargets: append([]LocalTarget(nil), task.LocalTargets...),
 	}
 	if err := validatePreviewSpec(&spec); err != nil {
 		return PreviewTask{}, errors.New("gateway returned an invalid Preview Task")

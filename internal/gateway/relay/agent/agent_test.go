@@ -54,27 +54,24 @@ func (reporter *testRuntimeReporter) BeginDrain() {
 }
 
 type testApplier struct {
-	mu                   sync.Mutex
-	keyGeneration        uint64
-	revocationGeneration uint64
+	mu            sync.Mutex
+	keyGeneration uint64
 }
 
 func (applier *testApplier) Apply(
 	_, _ string,
 	keys relaycontrol.VerificationKeySet,
-	revocations relaycontrol.RevocationSummary,
 ) error {
 	applier.mu.Lock()
 	applier.keyGeneration = keys.Generation
-	applier.revocationGeneration = revocations.Generation
 	applier.mu.Unlock()
 	return nil
 }
 
-func (applier *testApplier) AppliedGenerations() (uint64, uint64) {
+func (applier *testApplier) AppliedKeyGeneration() uint64 {
 	applier.mu.Lock()
 	defer applier.mu.Unlock()
-	return applier.keyGeneration, applier.revocationGeneration
+	return applier.keyGeneration
 }
 
 func TestAgentAllowsWSAndWSSAdvertisedEndpoints(t *testing.T) {
@@ -409,7 +406,7 @@ func TestWaitForRetryStopsOnCancellation(t *testing.T) {
 	}
 }
 
-func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T) {
+func TestTicketAuthenticatorAppliesAudienceAndKeysAtomically(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -425,12 +422,6 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	sessionID := uuid.NewString()
-	revocations, err := relaycontrol.NewRevocationSummary(2, []relaycontrol.RevokedSession{{
-		SessionSHA256: relaycontrol.HashSessionID(sessionID), MaximumGeneration: 1, ExpiresAt: now.Add(time.Minute),
-	}}, now, now.Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
 	authenticator, err := NewTicketAuthenticator(TicketAuthenticatorConfig{
 		RequiredOperation: "tunnel", ReplayEntries: 10,
 		Now: func() time.Time { return now },
@@ -439,10 +430,10 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 		t.Fatal(err)
 	}
 	relayID := "relay-" + strings.Repeat("a", 64)
-	if err := authenticator.Apply("https://controlPlane.example", relayID, keys, revocations); err != nil {
+	if err := authenticator.Apply("https://controlPlane.example", relayID, keys); err != nil {
 		t.Fatal(err)
 	}
-	if err := authenticator.Apply("https://replacement.example", relayID, keys, revocations); err == nil {
+	if err := authenticator.Apply("https://replacement.example", relayID, keys); err == nil {
 		t.Fatal("RelayTicket issuer change was accepted")
 	}
 	signer, err := relayticket.NewSigner("primary", privateKey)
@@ -470,11 +461,10 @@ func TestTicketAuthenticatorAppliesAudienceAndRevocationAtomically(t *testing.T)
 	}
 	request := httptest.NewRequest(http.MethodGet, "https://relay.example/tunnel", nil)
 	request.Header.Set("Authorization", "Bearer "+ticket)
-	if _, err := authenticator.Verify(request); err == nil {
-		t.Fatal("revoked Session generation was accepted")
+	if _, err := authenticator.Verify(request); err != nil {
+		t.Fatalf("valid ticket rejected: %v", err)
 	}
-	if keyGeneration, revocationGeneration := authenticator.AppliedGenerations(); keyGeneration != 3 ||
-		revocationGeneration != 2 {
-		t.Fatalf("generations = %d/%d", keyGeneration, revocationGeneration)
+	if keyGeneration := authenticator.AppliedKeyGeneration(); keyGeneration != 3 {
+		t.Fatalf("key generation = %d", keyGeneration)
 	}
 }

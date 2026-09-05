@@ -87,7 +87,7 @@ func (remoteGateway gateway) List(
 		if !reconcilable || len(task.LocalTargets) == 0 {
 			continue
 		}
-		targets, _, normalizeErr := normalizeTargets(exchangeTargets(task.LocalTargets))
+		targets, normalizeErr := reverserelay.NormalizeTargets(reverserelay.LocalTargets(task.LocalTargets), "exchange")
 		if normalizeErr != nil || matchTaskTargets(task, targets) != nil {
 			continue
 		}

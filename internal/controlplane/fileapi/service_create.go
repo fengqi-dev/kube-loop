@@ -54,7 +54,7 @@ func (handler *Service) resolveTarget(
 		return targetError(err)
 	}
 	if spec.Offset > spec.Size {
-		return invalid("resumeId", "remote partial upload exceeds the declared size")
+		return controlplaneapi.Invalid("resumeId", "remote partial upload exceeds the declared size")
 	}
 	return nil
 }

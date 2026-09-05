@@ -57,13 +57,7 @@ func (response RegistrationResponse) Validate(now time.Time) error {
 	if err := validateLease(response.LeaseID, response.LeaseExpiresAt, response.HeartbeatAfter, now); err != nil {
 		return err
 	}
-	if response.DesiredState != StateReady && response.DesiredState != StateDraining {
-		return errors.New("relay registration desired state is invalid")
-	}
-	if err := response.Keys.validate(now); err != nil {
-		return err
-	}
-	return response.Revocations.validate(now)
+	return response.Keys.validate(now)
 }
 
 func (request HeartbeatRequest) Validate(time.Time) error {
@@ -100,13 +94,7 @@ func (response HeartbeatResponse) Validate(now time.Time) error {
 	if err := validateLeaseTiming(response.LeaseExpiresAt, response.HeartbeatAfter, now); err != nil {
 		return err
 	}
-	if response.DesiredState != StateReady && response.DesiredState != StateDraining {
-		return errors.New("relay heartbeat desired state is invalid")
-	}
-	if err := response.Keys.validate(now); err != nil {
-		return err
-	}
-	return response.Revocations.validate(now)
+	return nil
 }
 
 func validTicketIssuer(value string) bool {
@@ -229,10 +217,6 @@ func (keys VerificationKeySet) Validate(now time.Time) error {
 }
 
 const sha256HexLength = 64
-
-func (summary RevocationSummary) validate(now time.Time) error {
-	return summary.Validate(now)
-}
 
 func validateLease(id string, expiresAt time.Time, heartbeat time.Duration, now time.Time) error {
 	if _, err := uuid.Parse(id); err != nil {

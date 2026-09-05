@@ -48,7 +48,7 @@ func (routes *Routes) issue(
 	request := ctx.Request()
 	sessionID := request.PathValue("sessionID")
 	if _, err := uuid.Parse(sessionID); err != nil {
-		return notFound()
+		return controlplaneapi.NotFound()
 	}
 	namespace, apiError := routequery.Namespace(request)
 	if apiError != nil {
@@ -117,5 +117,3 @@ func (routes *Routes) issue(
 	}
 	return nil
 }
-
-func notFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }

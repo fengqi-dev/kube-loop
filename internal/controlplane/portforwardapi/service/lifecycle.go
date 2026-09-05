@@ -111,14 +111,14 @@ func (service *Service) ownedBinding(
 	taskID string,
 ) (*trafficv1alpha1.TrafficBinding, *controlplaneapi.Error) {
 	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, notFound()
+		return nil, controlplaneapi.NotFound()
 	}
 	binding, err := service.bindings.Get(ctx, session.Namespace, taskID)
 	if err != nil || !ownedBinding(binding, identity, session) || !isPortForward(binding) {
 		if err != nil && !errors.Is(err, trafficbindingclient.ErrTrafficBindingNotFound) {
 			return nil, internalError(err)
 		}
-		return nil, notFound()
+		return nil, controlplaneapi.NotFound()
 	}
 	return binding, nil
 }

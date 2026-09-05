@@ -28,34 +28,30 @@ type Config struct {
 	HeartbeatAfter    time.Duration
 	SupportedVersions []string
 	VerificationKeys  relaycontrol.VerificationKeySet
-	Revocations       relaycontrol.RevocationSummary
 	EndpointPolicy    EndpointPolicy
 }
 
 type Registry struct {
-	mu              sync.Mutex
-	config          Config
-	relays          map[string]*relayRecord
-	assignments     map[string]assignmentRecord
-	restoredDesired map[string]relaycontrol.State
+	mu          sync.Mutex
+	config      Config
+	relays      map[string]*relayRecord
+	assignments map[string]assignmentRecord
 }
 
 type relayRecord struct {
-	identity                    relaycontrol.PeerIdentity
-	relayID                     string
-	leaseID                     string
-	endpoint                    string
-	state                       relaycontrol.State
-	desiredState                relaycontrol.State
-	capacity                    relaycontrol.Capacity
-	appliedKeyGeneration        uint64
-	appliedRevocationGeneration uint64
-	leaseExpiresAt              time.Time
-	lastHeartbeatAt             time.Time
-	reservations                uint32
-	selectedVersion             string
-	trafficEncryption           bool
-	noisePublicKey              string
+	identity             relaycontrol.PeerIdentity
+	relayID              string
+	leaseID              string
+	endpoint             string
+	state                relaycontrol.State
+	capacity             relaycontrol.Capacity
+	appliedKeyGeneration uint64
+	leaseExpiresAt       time.Time
+	lastHeartbeatAt      time.Time
+	reservations         uint32
+	selectedVersion      string
+	trafficEncryption    bool
+	noisePublicKey       string
 }
 
 type assignmentRecord struct {
@@ -65,18 +61,16 @@ type assignmentRecord struct {
 }
 
 type RelayStatus struct {
-	RelayID                     string
-	Endpoint                    string
-	State                       relaycontrol.State
-	DesiredState                relaycontrol.State
-	Capacity                    relaycontrol.Capacity
-	AppliedKeyGeneration        uint64
-	AppliedRevocationGeneration uint64
-	LeaseExpiresAt              time.Time
-	LastHeartbeatAt             time.Time
-	Reservations                uint32
-	Online                      bool
-	Topology                    map[string]string
+	RelayID              string
+	Endpoint             string
+	State                relaycontrol.State
+	Capacity             relaycontrol.Capacity
+	AppliedKeyGeneration uint64
+	LeaseExpiresAt       time.Time
+	LastHeartbeatAt      time.Time
+	Reservations         uint32
+	Online               bool
+	Topology             map[string]string
 }
 
 func New(config Config) (*Registry, error) {
@@ -126,18 +120,14 @@ func New(config Config) (*Registry, error) {
 	if err := config.VerificationKeys.Validate(now); err != nil {
 		return nil, err
 	}
-	if err := config.Revocations.Validate(now); err != nil {
-		return nil, err
-	}
 	config.SupportedVersions = append(
 		[]string(nil),
 		config.SupportedVersions...)
 	config.VerificationKeys = cloneKeys(config.VerificationKeys)
-	config.Revocations = cloneRevocations(config.Revocations)
 	return &Registry{
 		config: config, relays: make(map[string]*relayRecord),
 		assignments: make(
 			map[string]assignmentRecord,
-		), restoredDesired: make(map[string]relaycontrol.State),
+		),
 	}, nil
 }

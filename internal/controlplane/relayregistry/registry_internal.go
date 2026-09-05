@@ -15,9 +15,8 @@ func (registry *Registry) registrationResponseLocked(
 		Envelope: relaycontrol.NewRegistrationResponse().Envelope, SelectedVersion: selectedVersion,
 		TicketIssuer: registry.config.TicketIssuer,
 		RelayID:      relay.relayID, LeaseID: relay.leaseID, LeaseExpiresAt: relay.leaseExpiresAt,
-		HeartbeatAfter: registry.config.HeartbeatAfter, DesiredState: relay.desiredState,
-		Keys:        cloneKeys(registry.config.VerificationKeys),
-		Revocations: cloneRevocations(registry.config.Revocations),
+		HeartbeatAfter: registry.config.HeartbeatAfter,
+		Keys:           cloneKeys(registry.config.VerificationKeys),
 	}
 }
 
@@ -26,10 +25,8 @@ func (registry *Registry) availableLocked(
 	now time.Time,
 ) bool {
 	if relay.state != relaycontrol.StateReady ||
-		relay.desiredState != relaycontrol.StateReady ||
 		!relay.leaseExpiresAt.After(now) ||
-		relay.appliedKeyGeneration < registry.config.VerificationKeys.Generation ||
-		relay.appliedRevocationGeneration < registry.config.Revocations.Generation {
+		relay.appliedKeyGeneration < registry.config.VerificationKeys.Generation {
 		return false
 	}
 	logical := uint64(
@@ -95,16 +92,6 @@ func cloneKeys(
 	copyKeys := keys
 	copyKeys.Keys = append([]relaycontrol.VerificationKey(nil), keys.Keys...)
 	return copyKeys
-}
-
-func cloneRevocations(
-	summary relaycontrol.RevocationSummary,
-) relaycontrol.RevocationSummary {
-	copySummary := summary
-	copySummary.Sessions = append(
-		[]relaycontrol.RevokedSession(nil),
-		summary.Sessions...)
-	return copySummary
 }
 
 func cloneMap(source map[string]string) map[string]string {

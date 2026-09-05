@@ -34,10 +34,6 @@ func (store *Store) Audit() AuditRepository {
 	return store.repositories.Audit()
 }
 
-func (store *Store) RelayDesiredStates() RelayDesiredStateRepository {
-	return store.repositories.RelayDesiredStates()
-}
-
 func (store *Store) AdminSessions() AdminSessionRepository {
 	return store.repositories.AdminSessions()
 }

@@ -11,13 +11,10 @@ import (
 
 func (agent *Agent) register(ctx context.Context) error {
 	state, capacity := agent.config.Reporter.Snapshot()
-	keyGeneration, revocationGeneration := agent.config.Applier.AppliedGenerations()
 	request := relaycontrol.NewRegistrationRequestWithNegotiation()
 	request.Endpoint = agent.config.Endpoint
 	request.State = state
 	request.Capacity = capacity
-	request.AppliedKeyGeneration = keyGeneration
-	request.AppliedRevocationGeneration = revocationGeneration
 	var response relaycontrol.RegistrationResponse
 	if err := call(
 		ctx, agent, http.MethodPost, "/internal/v1/relays/register",
@@ -26,12 +23,9 @@ func (agent *Agent) register(ctx context.Context) error {
 		return err
 	}
 	if err := agent.config.Applier.Apply(
-		response.TicketIssuer, response.RelayID, response.Keys, response.Revocations,
+		response.TicketIssuer, response.RelayID, response.Keys,
 	); err != nil {
 		return fmt.Errorf("apply Relay registration control state: %w", err)
-	}
-	if response.DesiredState == relaycontrol.StateDraining {
-		agent.config.Reporter.BeginDrain()
 	}
 	if agent.config.TrafficEncryption && response.SelectedVersion != relaycontrol.APIVersionV2 {
 		return errors.New("control plane does not support encrypted Relay traffic")
@@ -45,8 +39,7 @@ func (agent *Agent) register(ctx context.Context) error {
 	agent.selectedVersion = response.SelectedVersion
 	agent.lastError = nil
 	agent.mu.Unlock()
-	// Acknowledge the just-applied generations immediately. Registration
-	// reports the previous generations and is intentionally not allocatable yet.
+	// Acknowledge the registration keys before this Relay becomes allocatable.
 	return agent.heartbeat(ctx)
 }
 
@@ -59,13 +52,11 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 		return errors.New("relay agent has no lease")
 	}
 	state, capacity := agent.config.Reporter.Snapshot()
-	keyGeneration, revocationGeneration := agent.config.Applier.AppliedGenerations()
 	request := relaycontrol.NewHeartbeatRequestForVersion(selectedVersion)
 	request.LeaseID = leaseID
 	request.State = state
 	request.Capacity = capacity
-	request.AppliedKeyGeneration = keyGeneration
-	request.AppliedRevocationGeneration = revocationGeneration
+	request.AppliedKeyGeneration = agent.config.Applier.AppliedKeyGeneration()
 	if selectedVersion == relaycontrol.APIVersionV2 {
 		request.TrafficEncryption = new(agent.config.TrafficEncryption)
 		if agent.config.TrafficEncryption {
@@ -78,16 +69,6 @@ func (agent *Agent) heartbeat(ctx context.Context) error {
 		request, relaycontrol.DecodeHeartbeatResponse, &response,
 	); err != nil {
 		return err
-	}
-	agent.mu.RLock()
-	relayID := agent.relayID
-	ticketIssuer := agent.ticketIssuer
-	agent.mu.RUnlock()
-	if err := agent.config.Applier.Apply(ticketIssuer, relayID, response.Keys, response.Revocations); err != nil {
-		return fmt.Errorf("apply Relay heartbeat control state: %w", err)
-	}
-	if response.DesiredState == relaycontrol.StateDraining {
-		agent.config.Reporter.BeginDrain()
 	}
 	agent.mu.Lock()
 	agent.leaseExpiresAt = response.LeaseExpiresAt

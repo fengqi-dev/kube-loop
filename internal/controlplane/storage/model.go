@@ -65,16 +65,6 @@ type AuditFilter struct {
 	Limit      int
 }
 
-type RelayDesiredState struct {
-	RelayID                   string
-	DesiredState              string
-	Version                   uint64
-	UpdatedBy                 string
-	UpdatedAuthenticationType string
-	Reason                    string
-	UpdatedAt                 time.Time
-}
-
 type AdminSession struct {
 	IDHash             []byte
 	IdentityID         string

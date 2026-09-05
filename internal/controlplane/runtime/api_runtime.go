@@ -28,7 +28,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficapi"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficbindingclient"
 	"github.com/fengqi-dev/kube-loop/internal/controlplane/trafficcontrolapi"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/relaycontrol"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/relayticket"
 )
 
@@ -135,25 +134,6 @@ func buildAPIRuntime(
 	})
 	if err != nil {
 		return nil, fmt.Errorf("initialize Relay Registry: %w", err)
-	}
-	if relayRegistry != nil {
-		desiredStates, loadErr := store.RelayDesiredStates().List(ctx)
-		if loadErr != nil {
-			return nil, fmt.Errorf("load durable Relay desired states: %w", loadErr)
-		}
-		for _, desired := range desiredStates {
-			restoreErr := relayRegistry.registry.RestoreDesiredState(
-				desired.RelayID,
-				relaycontrol.State(desired.DesiredState),
-			)
-			if restoreErr != nil {
-				return nil, fmt.Errorf(
-					"restore durable Relay desired state for %s: %w",
-					desired.RelayID,
-					restoreErr,
-				)
-			}
-		}
 	}
 	relayTicketService, err := ticketservice.New(ticketservice.Config{
 		Issuer: config.Document.API.PublicURL, TTL: config.RelayTicketTTL, Signer: relaySigner,

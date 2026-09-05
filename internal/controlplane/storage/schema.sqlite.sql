@@ -96,12 +96,6 @@ CREATE TABLE oauth_browser_sessions (
  auth_time TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT
 );
 
-CREATE TABLE relay_desired_states (
- relay_id TEXT PRIMARY KEY,
- desired_state TEXT NOT NULL CHECK (desired_state IN ('ready', 'draining')), version INTEGER NOT NULL CHECK (version > 0),
- updated_by TEXT NOT NULL, updated_authentication_type TEXT NOT NULL CHECK (updated_authentication_type IN ('normal', 'bootstrap')),
- reason TEXT NOT NULL, updated_at TEXT NOT NULL
-);
 CREATE INDEX sessions_identity_idx ON sessions(identity_id, updated_at);
 CREATE INDEX sessions_expiry_idx ON sessions(expires_at);
 CREATE INDEX sessions_namespace_state_idx ON sessions(namespace, state, updated_at);

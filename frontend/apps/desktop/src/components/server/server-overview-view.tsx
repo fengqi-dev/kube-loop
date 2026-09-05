@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useCallback, useEffect, useState } from "react";
 import {
   Copy,
@@ -67,7 +68,7 @@ export function ServerOverviewView({
       setHelper(await backend.helperStatus());
     } catch (reason) {
       toast.error(t("settings.helperLoadFailed"), {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
     }
   }, [t]);
@@ -81,7 +82,7 @@ export function ServerOverviewView({
       setSocksPortInput(String(settings.socksPort));
     }).catch((reason) => {
       if (active) toast.error(t("overview.portLoadFailed"), {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
     });
     return () => { active = false; };
@@ -95,7 +96,7 @@ export function ServerOverviewView({
       return true;
     } catch (reason) {
       toast.error(t("settings.helperInstallFailed"), {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
       return false;
     } finally {
@@ -111,7 +112,7 @@ export function ServerOverviewView({
       toast.success(t("settings.helperUninstallOk"));
     } catch (reason) {
       toast.error(t("settings.helperUninstallFailed"), {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
     } finally {
       setHelperAction(null);
@@ -132,7 +133,7 @@ export function ServerOverviewView({
       toast.success(t("overview.portSaved"));
     } catch (reason) {
       toast.error(t("overview.portSaveFailed"), {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
     } finally {
       setSavingSocksPort(false);

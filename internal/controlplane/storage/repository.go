@@ -119,23 +119,6 @@ type AuditRepository interface {
 	List(context.Context, AuditFilter) ([]AuditEvent, error)
 }
 
-type RelayDesiredStateRepository interface {
-	Get(context.Context, string) (RelayDesiredState, error)
-	List(context.Context) ([]RelayDesiredState, error)
-	// CompareAndSwap creates with expectedVersion=0 or advances an existing
-	// monotonic version. A stale expected version returns ErrConflict.
-	CompareAndSwap(
-		context.Context,
-		string,
-		string,
-		uint64,
-		string,
-		string,
-		string,
-		time.Time,
-	) (RelayDesiredState, error)
-}
-
 type AdminSessionRepository interface {
 	Create(context.Context, AdminSession) error
 	GetByHash(context.Context, []byte) (AdminSession, error)
@@ -224,7 +207,6 @@ type Repositories interface {
 	ResourceSnapshots() ResourceSnapshotRepository
 	Idempotency() IdempotencyRepository
 	Audit() AuditRepository
-	RelayDesiredStates() RelayDesiredStateRepository
 	AdminSessions() AdminSessionRepository
 	OAuthClients() OAuthClientRepository
 	OAuthSessions() OAuthSessionRepository

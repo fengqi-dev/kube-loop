@@ -11,7 +11,6 @@ type repositorySet struct {
 	resourceSnapshots          *resourceSnapshotRepository
 	idempotency                *idempotencyRepository
 	audit                      *auditRepository
-	relayDesiredStates         *relayDesiredStateRepository
 	adminSessions              *adminSessionRepository
 	oauthClients               *oauthClientRepository
 	oauthSessions              *oauthSessionRepository
@@ -45,9 +44,6 @@ func newRepositorySet(
 			repositoryBase: base,
 		},
 		audit: audit,
-		relayDesiredStates: &relayDesiredStateRepository{
-			repositoryBase: base,
-		},
 		adminSessions: &adminSessionRepository{
 			repositoryBase: base,
 		},
@@ -107,10 +103,6 @@ func (repositories *repositorySet) Idempotency() IdempotencyRepository {
 
 func (repositories *repositorySet) Audit() AuditRepository {
 	return repositories.audit
-}
-
-func (repositories *repositorySet) RelayDesiredStates() RelayDesiredStateRepository {
-	return repositories.relayDesiredStates
 }
 
 func (repositories *repositorySet) AdminSessions() AdminSessionRepository {

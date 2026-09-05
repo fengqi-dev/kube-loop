@@ -21,7 +21,7 @@ func TestStorageErrorMapsStablePublicCategories(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			apiError := storageError(test.err)
+			apiError := apiErrors.Storage(test.err)
 			if apiError.Code != test.expected ||
 				(test.expected != controlplaneapi.CodeNotFound && !errors.Is(apiError.Cause, test.err)) {
 				t.Fatalf("storage error = %#v", apiError)

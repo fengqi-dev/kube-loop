@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useRequestGeneration } from "@/components/workspace/use-request-generation";
 import { backend } from "@/backend";
 import { Badge } from "@/components/ui/badge";
@@ -174,7 +175,7 @@ export function useServerConnection({
         }
       })
       .catch((reason: unknown) => {
-        if (active && epoch === connectionEpoch.current) setError(messageOf(reason));
+        if (active && epoch === connectionEpoch.current) setError(errorMessage(reason));
       })
       .finally(() => {
         if (active && epoch === connectionEpoch.current) setBusy(undefined);
@@ -309,7 +310,7 @@ export function useServerConnection({
 		setPreviews([]);
 	  }
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       throw reason;
     } finally {
       setBusy(undefined);
@@ -348,7 +349,7 @@ export function useServerConnection({
 	  setPreviews(remotePreviews);
 	  onNavigate?.("overview");
     } catch (reason) {
-      if (!loginCancelled.current) setError(messageOf(reason));
+      if (!loginCancelled.current) setError(errorMessage(reason));
     } finally {
       loginInFlight.current = false;
       loginCancelled.current = false;
@@ -367,7 +368,7 @@ export function useServerConnection({
     } catch (reason) {
       loginCancelled.current = false;
       setLoginCancelBusy(false);
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     }
   }
 
@@ -378,7 +379,7 @@ export function useServerConnection({
     try {
       await backend.logoutServer(profile.id);
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       clearWorkspaceState();
       onAuthChange?.({ authenticated: false });
@@ -401,7 +402,7 @@ export function useServerConnection({
 	  setProfile(nextProfileState.profiles.find((item) => item.id === profile.id) ?? profile);
       setInventory(await backend.loadServerInventory(profile.id, inventory?.namespace ?? profile.lastNamespace ?? ""));
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       try {
         const session = await backend.serverAuthStatus(profile.id);
         setAuth(session);
@@ -428,7 +429,7 @@ export function useServerConnection({
       setDiscovery(undefined);
       clearWorkspaceState();
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       setBusy(undefined);
     }
@@ -471,7 +472,7 @@ export function useServerConnection({
       setProviderId("");
       setAddress(selected?.baseUrl ?? "");
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       try {
         const state = normalizeProfileState(await backend.serverProfiles());
         const selected = state.profiles.find((item) => item.id === state.activeProfileId);
@@ -525,7 +526,7 @@ export function useServerConnection({
 	  setSSHPod("");
 	  setSSHContainer("");
     } catch (reason) {
-      if (isCurrent()) setError(messageOf(reason));
+      if (isCurrent()) setError(errorMessage(reason));
     } finally {
       if (isCurrent()) setBusy(undefined);
     }
@@ -545,7 +546,7 @@ export function useServerConnection({
       // still running on the Gateway, so surface them in the session lists.
       await refreshSessionResources(profile.id);
     } catch (reason) {
-      if (epoch === connectionEpoch.current) setError(messageOf(reason));
+      if (epoch === connectionEpoch.current) setError(errorMessage(reason));
     } finally {
       if (epoch === connectionEpoch.current) setBusy(undefined);
     }
@@ -579,7 +580,7 @@ export function useServerConnection({
       // gateway tasks stay running, so surface the released state locally.
       await refreshSessionResources(profile.id);
     } catch (reason) {
-      if (epoch === connectionEpoch.current) setError(messageOf(reason));
+      if (epoch === connectionEpoch.current) setError(errorMessage(reason));
     } finally {
       if (epoch === connectionEpoch.current) setBusy(undefined);
     }
@@ -610,7 +611,7 @@ export function useServerConnection({
 			setForwards((current) => [...current, info]);
 			setForwardLocalPort("");
 		} catch (reason) {
-			setError(messageOf(reason));
+			setError(errorMessage(reason));
 		} finally {
 			setBusy(undefined);
 		}
@@ -642,7 +643,7 @@ export function useServerConnection({
 			});
 			setExchanges((current) => [...current.filter((item) => item.id !== info.id), info]);
 		} catch (reason) {
-			setError(messageOf(reason));
+			setError(errorMessage(reason));
 		} finally {
 			setBusy(undefined);
 		}
@@ -674,7 +675,7 @@ export function useServerConnection({
 			});
 			setMirrors((current) => [...current.filter((item) => item.id !== info.id), info]);
 		} catch (reason) {
-			setError(messageOf(reason));
+			setError(errorMessage(reason));
 		} finally {
 			setBusy(undefined);
 		}
@@ -709,7 +710,7 @@ export function useServerConnection({
 			});
 			setPreviews((current) => [...current.filter((item) => item.id !== info.id), info]);
 		} catch (reason) {
-			setError(messageOf(reason));
+			setError(errorMessage(reason));
 		} finally {
 			setBusy(undefined);
 		}
@@ -726,7 +727,7 @@ export function useServerConnection({
 				container: sshContainer,
 			});
 		} catch (reason) {
-			setError(messageOf(reason));
+			setError(errorMessage(reason));
 		} finally {
 			setBusy(undefined);
 		}
@@ -757,7 +758,7 @@ export function useServerConnection({
         setInventory(await backend.loadServerInventory(result.profile.id, result.profile.lastNamespace ?? ""));
       }
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       throw reason;
     } finally {
       setBusy(undefined);
@@ -772,7 +773,7 @@ export function useServerConnection({
       const document = await backend.testServerAddress(item.baseUrl);
       if (item.id === profile?.id) setDiscovery(document);
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       throw reason;
     } finally {
       setBusy(undefined);
@@ -795,7 +796,7 @@ export function useServerConnection({
         clearWorkspaceState();
       }
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       throw reason;
     } finally {
       setBusy(undefined);
@@ -822,7 +823,7 @@ export function useServerConnection({
         setDiscovery(result.discovery);
       }
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
       throw reason;
     } finally {
       setBusy(undefined);
@@ -1709,8 +1710,4 @@ function dataPlaneRetryLabel(reason: DataPlaneStatusEvent["reason"]): string {
   if (reason === "session_expired") return "Start new session";
   if (reason === "session_changed") return "Reload session";
   return "Retry connection";
-}
-
-function messageOf(reason: unknown) {
-  return reason instanceof Error ? reason.message : String(reason);
 }

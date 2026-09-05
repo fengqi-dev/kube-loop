@@ -20,13 +20,12 @@ type TicketAuthenticatorConfig struct {
 }
 
 type TicketAuthenticator struct {
-	mu                   sync.RWMutex
-	config               TicketAuthenticatorConfig
-	requestVerifier      *relaybearer.RequestVerifier
-	relayID              string
-	issuer               string
-	keyGeneration        uint64
-	revocationGeneration uint64
+	mu              sync.RWMutex
+	config          TicketAuthenticatorConfig
+	requestVerifier *relaybearer.RequestVerifier
+	relayID         string
+	issuer          string
+	keyGeneration   uint64
 }
 
 func NewTicketAuthenticator(config TicketAuthenticatorConfig) (*TicketAuthenticator, error) {
@@ -46,7 +45,6 @@ func NewTicketAuthenticator(config TicketAuthenticatorConfig) (*TicketAuthentica
 func (authenticator *TicketAuthenticator) Apply(
 	issuer, relayID string,
 	keys relaycontrol.VerificationKeySet,
-	revocations relaycontrol.RevocationSummary,
 ) error {
 	if authenticator == nil {
 		return errors.New("dynamic RelayTicket authenticator is unavailable")
@@ -54,9 +52,6 @@ func (authenticator *TicketAuthenticator) Apply(
 	now := authenticator.config.Now().UTC()
 	parsed, err := keys.Parse(now)
 	if err != nil {
-		return err
-	}
-	if err := revocations.Validate(now); err != nil {
 		return err
 	}
 	verificationKeys := make(map[string]ed25519.PublicKey, len(parsed))
@@ -74,14 +69,6 @@ func (authenticator *TicketAuthenticator) Apply(
 	if err != nil {
 		return err
 	}
-	revocationSnapshot := revocations
-	checker := relaybearer.RevocationChecker(func(claims relayticket.Claims, checkedAt time.Time) bool {
-		if revocationSnapshot.Generation > 0 && !revocationSnapshot.ValidUntil.After(checkedAt) {
-			return true
-		}
-		return revocationSnapshot.Revokes(claims.SessionID, claims.SessionGeneration, checkedAt)
-	})
-
 	authenticator.mu.Lock()
 	defer authenticator.mu.Unlock()
 	if authenticator.relayID != "" && authenticator.relayID != relayID {
@@ -90,7 +77,7 @@ func (authenticator *TicketAuthenticator) Apply(
 	if authenticator.issuer != "" && authenticator.issuer != issuer {
 		return errors.New("RelayTicket issuer changed within one Data Plane process")
 	}
-	if keys.Generation < authenticator.keyGeneration || revocations.Generation < authenticator.revocationGeneration {
+	if keys.Generation < authenticator.keyGeneration {
 		return errors.New("relay control generation moved backwards")
 	}
 	if authenticator.requestVerifier == nil {
@@ -102,17 +89,16 @@ func (authenticator *TicketAuthenticator) Apply(
 		if err != nil {
 			return err
 		}
-		if err := requestVerifier.Update(verifier, checker); err != nil {
+		if err := requestVerifier.Update(verifier, nil); err != nil {
 			return err
 		}
 		authenticator.requestVerifier = requestVerifier
-	} else if err := authenticator.requestVerifier.Update(verifier, checker); err != nil {
+	} else if err := authenticator.requestVerifier.Update(verifier, nil); err != nil {
 		return err
 	}
 	authenticator.relayID = relayID
 	authenticator.issuer = issuer
 	authenticator.keyGeneration = keys.Generation
-	authenticator.revocationGeneration = revocations.Generation
 	return nil
 }
 
@@ -130,7 +116,7 @@ func (authenticator *TicketAuthenticator) Verify(request *http.Request) (relayti
 }
 
 // VerifyReusable validates a ticket for the reconnectable v3 forward
-// WebSocket. It retains signature, expiry, revocation and generation checks.
+// WebSocket. It retains signature and expiry checks.
 func (authenticator *TicketAuthenticator) VerifyReusable(request *http.Request) (relayticket.Claims, error) {
 	if authenticator == nil {
 		return relayticket.Claims{}, relayticket.ErrInvalid
@@ -144,13 +130,13 @@ func (authenticator *TicketAuthenticator) VerifyReusable(request *http.Request) 
 	return requestVerifier.VerifyReusable(request)
 }
 
-func (authenticator *TicketAuthenticator) AppliedGenerations() (uint64, uint64) {
+func (authenticator *TicketAuthenticator) AppliedKeyGeneration() uint64 {
 	if authenticator == nil {
-		return 0, 0
+		return 0
 	}
 	authenticator.mu.RLock()
 	defer authenticator.mu.RUnlock()
-	return authenticator.keyGeneration, authenticator.revocationGeneration
+	return authenticator.keyGeneration
 }
 
 func (authenticator *TicketAuthenticator) RelayID() string {

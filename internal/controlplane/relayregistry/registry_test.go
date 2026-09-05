@@ -186,7 +186,7 @@ func TestAllocationNegotiatesTrafficEncryptionCapability(t *testing.T) {
 	}
 }
 
-func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(
+func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsGatewayDrain(
 	t *testing.T,
 ) {
 	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
@@ -218,13 +218,10 @@ func TestAllocationPrefersTrustedTopologyThenLowerLoadAndHonorsDrain(
 			a.RelayID,
 		)
 	}
-	if err := registry.SetDesiredState(a.RelayID, relaycontrol.StateDraining); err != nil {
-		t.Fatal(err)
-	}
 	drainHeartbeat := heartbeatRequest(a.LeaseID, 10, 1)
-	drainResponse, err := registry.Heartbeat(zoneA, drainHeartbeat)
-	if err != nil || drainResponse.DesiredState != relaycontrol.StateDraining {
-		t.Fatalf("drain heartbeat = %#v err = %v", drainResponse, err)
+	drainHeartbeat.State = relaycontrol.StateDraining
+	if _, err := registry.Heartbeat(zoneA, drainHeartbeat); err != nil {
+		t.Fatalf("drain heartbeat: %v", err)
 	}
 	newAssignment, err := registry.Allocate(allocationRequest("zone-a"))
 	if err != nil {
@@ -272,17 +269,20 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 	}
 
 	clock = &testClock{now: time.Now().UTC().Truncate(time.Second)}
-	registry = newTestRegistry(t, clock, 100)
-	registered = registerAndAcknowledge(
-		t,
-		registry,
-		identity,
-		"a.example.test",
-		10,
-		1,
-	)
 	keys := verificationKeys(t, clock.Now(), 2)
-	if err := registry.UpdateControlPlaneState(keys, relaycontrol.RevocationSummary{}); err != nil {
+	registry, err := New(Config{
+		Now: clock.Now, LeaseDuration: 45 * time.Second, HeartbeatAfter: 10 * time.Second,
+		TicketIssuer: "https://control-plane.example.test", VerificationKeys: keys,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registered, err = registry.Register(identity, registrationRequest("a.example.test", 10, 0))
+	if err != nil || registered.Keys.Generation != 2 {
+		t.Fatalf("registration = %#v err = %v", registered, err)
+	}
+	staleHeartbeat := heartbeatRequest(registered.LeaseID, 10, 1)
+	if _, err := registry.Heartbeat(identity, staleHeartbeat); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := registry.Allocate(allocationRequest("")); !errors.Is(
@@ -298,11 +298,9 @@ func TestLeaseExpiryAndControlGenerationStopNewAllocations(t *testing.T) {
 	if _, err := registry.Allocate(allocationRequest("")); err != nil {
 		t.Fatal(err)
 	}
-	if err := registry.UpdateControlPlaneState(
-		verificationKeys(t, clock.Now(), 1),
-		relaycontrol.RevocationSummary{},
-	); err == nil {
-		t.Fatal("control-plane key generation moved backwards")
+	heartbeat.AppliedKeyGeneration = 3
+	if _, err := registry.Heartbeat(identity, heartbeat); err == nil {
+		t.Fatal("unknown key generation was accepted")
 	}
 }
 
@@ -375,47 +373,6 @@ func TestReleaseFencesGenerationAndRestoresRelayCapacity(t *testing.T) {
 	}
 	if _, err := registry.Allocate(allocationRequest("zone-a")); err != nil {
 		t.Fatalf("released capacity was not reusable: %v", err)
-	}
-}
-
-func TestRestoreDesiredStateAppliesOfflineAndOnlineIntent(t *testing.T) {
-	clock := &testClock{now: time.Now().UTC().Truncate(time.Second)}
-	registry := newTestRegistry(t, clock, 10)
-	identity := peer("zone-a", "pod-a")
-	relayID, err := identity.RelayID()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.RestoreDesiredState(relayID, relaycontrol.StateDraining); err != nil {
-		t.Fatal(err)
-	}
-	registered, err := registry.Register(identity, registrationRequest("a.example.test", 10, 0))
-	if err != nil || registered.DesiredState != relaycontrol.StateDraining {
-		t.Fatalf("registration = %#v err = %v", registered, err)
-	}
-	heartbeat := heartbeatRequest(registered.LeaseID, 10, 1)
-	response, err := registry.Heartbeat(identity, heartbeat)
-	if err != nil || response.DesiredState != relaycontrol.StateDraining {
-		t.Fatalf("draining heartbeat = %#v err = %v", response, err)
-	}
-	if _, err := registry.Allocate(allocationRequest("zone-a")); !errors.Is(err, ErrUnavailable) {
-		t.Fatalf("draining Relay allocation error = %v", err)
-	}
-	if err := registry.RestoreDesiredState(relayID, relaycontrol.StateReady); err != nil {
-		t.Fatal(err)
-	}
-	response, err = registry.Heartbeat(identity, heartbeat)
-	if err != nil || response.DesiredState != relaycontrol.StateReady {
-		t.Fatalf("ready heartbeat = %#v err = %v", response, err)
-	}
-	if _, err := registry.Allocate(allocationRequest("zone-a")); err != nil {
-		t.Fatalf("restored ready Relay was unavailable: %v", err)
-	}
-	if err := registry.RestoreDesiredState("", relaycontrol.StateReady); err == nil {
-		t.Fatal("empty durable Relay identity was accepted")
-	}
-	if err := registry.RestoreDesiredState(relayID, relaycontrol.State("invalid")); err == nil {
-		t.Fatal("invalid durable desired state was accepted")
 	}
 }
 
@@ -501,7 +458,6 @@ func registrationRequest(
 		MaximumPhysicalConnections: 100, MaximumLogicalStreams: maximumStreams,
 		ActivePhysicalConnections: 1, ActiveLogicalStreams: activeStreams,
 	}
-	request.AppliedKeyGeneration = 0
 	return request
 }
 

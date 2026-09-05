@@ -76,7 +76,7 @@ func New(config Config) (*Service, error) {
 	}
 	if config.TTL < 15*time.Second || config.TTL > relayticket.MaximumLifetime {
 		return nil, errors.New(
-			"relay ticket TTL must be between 15 seconds and 2 minutes",
+			"relay ticket TTL must be between 15 seconds and 1 minute",
 		)
 	}
 	if config.Now == nil {

@@ -50,7 +50,7 @@ func (handler *Service) list(
 			Cause:   err,
 		}
 	}
-	writeJSON(ctx, http.StatusOK, ListDocument{
+	taskapi.WriteJSON(ctx, http.StatusOK, ListDocument{
 		SessionID: session.ID, Namespace: session.Namespace,
 		Pod: spec.Pod, Container: container, Path: spec.Path, Items: items,
 	})
@@ -64,16 +64,16 @@ func (handler *Service) get(
 ) *controlplaneapi.Error {
 	request := ctx.Request()
 	if _, err := uuid.Parse(taskID); err != nil {
-		return notFound()
+		return controlplaneapi.NotFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
 	if err != nil || !taskapi.Owned(task, TaskType, identity, session) {
-		return notFound()
+		return controlplaneapi.NotFound()
 	}
 	document, err := decodeTask(task, session.Namespace)
 	if err != nil {
-		return internalError(err)
+		return apiErrors.Internal(err)
 	}
-	writeJSON(ctx, http.StatusOK, document)
+	taskapi.WriteJSON(ctx, http.StatusOK, document)
 	return nil
 }

@@ -48,31 +48,15 @@ type VerificationKeySet struct {
 	Keys       []VerificationKey `json:"keys"`
 }
 
-type RevocationSummary struct {
-	Generation  uint64           `json:"generation"`
-	SHA256      string           `json:"sha256,omitempty"`
-	GeneratedAt time.Time        `json:"generatedAt"`
-	ValidUntil  time.Time        `json:"validUntil"`
-	Sessions    []RevokedSession `json:"sessions,omitempty"`
-}
-
-type RevokedSession struct {
-	SessionSHA256     string    `json:"sessionSha256"`
-	MaximumGeneration uint64    `json:"maximumGeneration"`
-	ExpiresAt         time.Time `json:"expiresAt"`
-}
-
 // RegistrationRequest deliberately contains no Relay ID. The Control Plane
 // derives it from the authenticated transport identity, never from this body.
 type RegistrationRequest struct {
 	Envelope
 
-	SupportedVersions           []string `json:"supportedVersions"`
-	Endpoint                    string   `json:"endpoint"`
-	State                       State    `json:"state"`
-	Capacity                    Capacity `json:"capacity"`
-	AppliedKeyGeneration        uint64   `json:"appliedKeyGeneration"`
-	AppliedRevocationGeneration uint64   `json:"appliedRevocationGeneration"`
+	SupportedVersions []string `json:"supportedVersions"`
+	Endpoint          string   `json:"endpoint"`
+	State             State    `json:"state"`
+	Capacity          Capacity `json:"capacity"`
 }
 
 type RegistrationResponse struct {
@@ -84,31 +68,25 @@ type RegistrationResponse struct {
 	LeaseID         string             `json:"leaseId"`
 	LeaseExpiresAt  time.Time          `json:"leaseExpiresAt"`
 	HeartbeatAfter  time.Duration      `json:"heartbeatAfter"`
-	DesiredState    State              `json:"desiredState"`
 	Keys            VerificationKeySet `json:"verificationKeys"`
-	Revocations     RevocationSummary  `json:"revocations"`
 }
 
 type HeartbeatRequest struct {
 	Envelope
 
-	LeaseID                     string   `json:"leaseId"`
-	State                       State    `json:"state"`
-	Capacity                    Capacity `json:"capacity"`
-	AppliedKeyGeneration        uint64   `json:"appliedKeyGeneration"`
-	AppliedRevocationGeneration uint64   `json:"appliedRevocationGeneration"`
-	TrafficEncryption           *bool    `json:"trafficEncryption,omitempty"`
-	NoisePublicKey              string   `json:"noisePublicKey,omitempty"`
+	LeaseID              string   `json:"leaseId"`
+	State                State    `json:"state"`
+	Capacity             Capacity `json:"capacity"`
+	AppliedKeyGeneration uint64   `json:"appliedKeyGeneration"`
+	TrafficEncryption    *bool    `json:"trafficEncryption,omitempty"`
+	NoisePublicKey       string   `json:"noisePublicKey,omitempty"`
 }
 
 type HeartbeatResponse struct {
 	Envelope
 
-	LeaseExpiresAt time.Time          `json:"leaseExpiresAt"`
-	HeartbeatAfter time.Duration      `json:"heartbeatAfter"`
-	DesiredState   State              `json:"desiredState"`
-	Keys           VerificationKeySet `json:"verificationKeys"`
-	Revocations    RevocationSummary  `json:"revocations"`
+	LeaseExpiresAt time.Time     `json:"leaseExpiresAt"`
+	HeartbeatAfter time.Duration `json:"heartbeatAfter"`
 }
 
 type AllocationRequest struct {

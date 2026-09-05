@@ -24,12 +24,6 @@ func TestVersionedMessagesRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	keys := testKeySet(t, now)
-	revocations, err := NewRevocationSummary(1, []RevokedSession{{
-		SessionSHA256: HashSessionID(uuid.NewString()), MaximumGeneration: 2, ExpiresAt: now.Add(time.Minute),
-	}}, now.Add(-time.Second), now.Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	}
 	capacity := Capacity{
 		MaximumPhysicalConnections: 100, MaximumLogicalStreams: 1000,
 		ActivePhysicalConnections: 4, ActiveLogicalStreams: 20,
@@ -50,7 +44,7 @@ func TestVersionedMessagesRoundTrip(t *testing.T) {
 			TicketIssuer: "https://control-plane.example.test",
 			RelayID:      relayID, LeaseID: leaseID,
 			LeaseExpiresAt: now.Add(time.Minute), HeartbeatAfter: 10 * time.Second,
-			DesiredState: StateReady, Keys: keys, Revocations: revocations,
+			Keys: keys,
 		}, func(raw []byte, now time.Time) error { _, err := DecodeRegistrationResponse(raw, now); return err }},
 		{"heartbeat request", HeartbeatRequest{
 			Envelope: NewHeartbeatRequest().Envelope, LeaseID: leaseID,
@@ -58,7 +52,7 @@ func TestVersionedMessagesRoundTrip(t *testing.T) {
 		}, func(raw []byte, now time.Time) error { _, err := DecodeHeartbeatRequest(raw, now); return err }},
 		{"heartbeat response", HeartbeatResponse{
 			Envelope: NewHeartbeatResponse().Envelope, LeaseExpiresAt: now.Add(time.Minute),
-			HeartbeatAfter: 10 * time.Second, DesiredState: StateDraining, Keys: keys, Revocations: revocations,
+			HeartbeatAfter: 10 * time.Second,
 		}, func(raw []byte, now time.Time) error { _, err := DecodeHeartbeatResponse(raw, now); return err }},
 		{"allocation request", AllocationRequest{
 			Envelope: NewAllocationRequest().Envelope, SessionID: uuid.NewString(), Generation: 1,
@@ -139,7 +133,7 @@ func TestRegistrationCannotSubmitRelayIdentityAndUnknownVersionsFail(t *testing.
 	}
 }
 
-func TestRollingUpgradeNegotiatesHighestCommonVersion(t *testing.T) {
+func TestNegotiatesHighestCommonVersion(t *testing.T) {
 	v1, v2 := APIVersion, "relay.kubeloop.io/v2"
 	for _, test := range []struct {
 		name  string
@@ -214,7 +208,7 @@ func TestPeerIdentityDerivesRelayIDOutsideMessage(t *testing.T) {
 	}
 }
 
-func TestCapacityLeaseKeysAndRevocationsFailClosed(t *testing.T) {
+func TestCapacityLeaseAndKeysFailClosed(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Second)
 	request := NewRegistrationRequest()
 	request.Endpoint = "wss://relay.example.test/tunnel"
@@ -231,7 +225,6 @@ func TestCapacityLeaseKeysAndRevocationsFailClosed(t *testing.T) {
 	response.LeaseID = uuid.NewString()
 	response.LeaseExpiresAt = now.Add(time.Minute)
 	response.HeartbeatAfter = time.Minute
-	response.DesiredState = StateReady
 	response.Keys = testKeySet(t, now)
 	if _, err := Encode(response, now); err == nil {
 		t.Fatal("heartbeat interval equal to lease lifetime was accepted")
@@ -241,37 +234,6 @@ func TestCapacityLeaseKeysAndRevocationsFailClosed(t *testing.T) {
 	response.Keys.Keys[0].NotBefore = now.Add(time.Minute)
 	if _, err := Encode(response, now); err == nil {
 		t.Fatal("key set without an active verification key was accepted")
-	}
-
-	response.Keys = testKeySet(t, now)
-	response.Revocations = RevocationSummary{
-		Generation: 1, SHA256: "not-a-digest", GeneratedAt: now,
-		ValidUntil: now.Add(time.Minute), Sessions: []RevokedSession{},
-	}
-	if _, err := Encode(response, now); err == nil {
-		t.Fatal("invalid revocation summary was accepted")
-	}
-}
-
-func TestRevocationSummaryIsCanonicalAndGenerationBound(t *testing.T) {
-	now := time.Now().UTC().Truncate(time.Second)
-	first, second := uuid.NewString(), uuid.NewString()
-	summary, err := NewRevocationSummary(7, []RevokedSession{
-		{SessionSHA256: HashSessionID(second), MaximumGeneration: 4, ExpiresAt: now.Add(time.Minute)},
-		{SessionSHA256: HashSessionID(first), MaximumGeneration: 2, ExpiresAt: now.Add(time.Minute)},
-	}, now, now.Add(30*time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !summary.Revokes(first, 2, now) || summary.Revokes(first, 3, now) ||
-		!summary.Revokes(second, 4, now) || summary.Revokes(uuid.NewString(), 1, now) {
-		t.Fatalf("revocation lookup failed: %#v", summary)
-	}
-	tampered := summary
-	tampered.Sessions = append([]RevokedSession(nil), summary.Sessions...)
-	tampered.Sessions[0].MaximumGeneration++
-	if err := tampered.Validate(now); err == nil {
-		t.Fatal("tampered revocation summary digest was accepted")
 	}
 }
 

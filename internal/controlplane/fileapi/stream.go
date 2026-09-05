@@ -30,11 +30,11 @@ func (handler *Service) stream(
 	request := ctx.Request()
 	writer := ctx.Response()
 	if _, err := uuid.Parse(taskID); err != nil {
-		return notFound()
+		return controlplaneapi.NotFound()
 	}
 	task, err := handler.storage.Tasks().GetByID(request.Context(), taskID)
 	if err != nil || !taskapi.Owned(task, TaskType, identity, session) {
-		return notFound()
+		return controlplaneapi.NotFound()
 	}
 	if task.State != remotetask.Pending {
 		return &controlplaneapi.Error{
@@ -44,13 +44,13 @@ func (handler *Service) stream(
 	}
 	spec, err := handler.specFromTask(task)
 	if err != nil {
-		return internalError(err)
+		return apiErrors.Internal(err)
 	}
 	if err := handler.storage.Tasks().UpdateState(
 		request.Context(), task.ID, remotetask.Pending, remotetask.Starting,
 		json.RawMessage(`{}`), handler.now().UTC(),
 	); err != nil {
-		return storageError(err)
+		return apiErrors.Storage(err)
 	}
 	connection, err := websocketio.Upgrade(writer, request)
 	if err != nil {

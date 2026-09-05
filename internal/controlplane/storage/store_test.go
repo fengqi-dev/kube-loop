@@ -138,7 +138,7 @@ func TestSQLiteSchemaV2MigrationRemovesOnlyLegacyTrafficTasks(t *testing.T) {
 
 func TestSQLiteInitialSchemaOmitsRemovedResourcesAndLegacyFields(t *testing.T) {
 	store := openSQLiteTestStore(t, filepath.Join(t.TempDir(), "initial.db"))
-	for _, table := range []string{"identity_emails", "invitations", "organizations", "organization_memberships", "iam_groups", "group_memberships", "group_namespaces", "security_policies"} {
+	for _, table := range []string{"relay_desired_states", "identity_emails", "invitations", "organizations", "organization_memberships", "iam_groups", "group_memberships", "group_namespaces", "security_policies"} {
 		var tableCount int
 		if err := store.db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).
 			Scan(&tableCount); err != nil {
@@ -149,13 +149,12 @@ func TestSQLiteInitialSchemaOmitsRemovedResourcesAndLegacyFields(t *testing.T) {
 		}
 	}
 	for table, omitted := range map[string][]string{
-		"admin_sessions":       {"schema_version"},
-		"audit_events":         {"schema_version"},
-		"idempotency_records":  {"schema_version"},
-		"relay_desired_states": {"schema_version"},
-		"resource_snapshots":   {"schema_version"},
-		"sessions":             {"schema_version"},
-		"tasks":                {"schema_version"},
+		"admin_sessions":      {"schema_version"},
+		"audit_events":        {"schema_version"},
+		"idempotency_records": {"schema_version"},
+		"resource_snapshots":  {"schema_version"},
+		"sessions":            {"schema_version"},
+		"tasks":               {"schema_version"},
 	} {
 		columns := sqliteTableColumns(t, store.db, table)
 		for _, column := range omitted {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
 	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/remotetask"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
@@ -87,7 +88,7 @@ func (remoteGateway gateway) List(
 		if !reconcilable || len(task.LocalTargets) == 0 {
 			continue
 		}
-		targets, _, normalizeErr := normalizeTargets(mirrorTargets(task.LocalTargets))
+		targets, normalizeErr := reverserelay.NormalizeTargets(reverserelay.LocalTargets(task.LocalTargets), "mirror")
 		if normalizeErr != nil || matchTaskTargets(task, targets) != nil {
 			continue
 		}

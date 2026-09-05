@@ -69,10 +69,6 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 	)
 	t.Run("audit", func(t *testing.T) { testAuditRepository(t, store) })
 	t.Run(
-		"Relay desired states",
-		func(t *testing.T) { testRelayDesiredStateRepository(t, store) },
-	)
-	t.Run(
 		"management list pagination",
 		func(t *testing.T) { testManagementListPagination(t, store) },
 	)
@@ -89,36 +85,6 @@ func testRepositoryConformance(t *testing.T, store *Store) {
 		"stable errors",
 		func(t *testing.T) { testStableRepositoryErrors(t, store) },
 	)
-}
-
-func testRelayDesiredStateRepository(t *testing.T, store *Store) {
-	t.Helper()
-	ctx := context.Background()
-	now := time.Date(2026, 8, 10, 12, 30, 0, 0, time.UTC)
-	relayID := "relay-conformance-a"
-	actorID := uuid.NewString()
-	created, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "draining", 0, actorID, sessionKindNormal, "drain for maintenance", now,
-	)
-	if err != nil || created.Version != 1 ||
-		created.DesiredState != "draining" {
-		t.Fatalf("create Relay desired state = %#v, %v", created, err)
-	}
-	if _, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "ready", 0, actorID, sessionKindNormal, "stale recovery", now,
-	); !errors.Is(err, ErrConflict) {
-		t.Fatalf("stale Relay desired state error = %v", err)
-	}
-	updated, err := store.RelayDesiredStates().CompareAndSwap(
-		ctx, relayID, "ready", 1, actorID, sessionKindNormal, "restore capacity", now.Add(time.Minute),
-	)
-	if err != nil || updated.Version != 2 || updated.DesiredState != "ready" {
-		t.Fatalf("update Relay desired state = %#v, %v", updated, err)
-	}
-	listed, err := store.RelayDesiredStates().List(ctx)
-	if err != nil || len(listed) != 1 || listed[0].Version != 2 {
-		t.Fatalf("list Relay desired states = %#v, %v", listed, err)
-	}
 }
 
 func testManagementListPagination(t *testing.T, store *Store) {

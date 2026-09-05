@@ -10,6 +10,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
 	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
@@ -100,7 +101,7 @@ func (manager *Manager) Start(
 		return Info{}, err
 	}
 	task, err := manager.client.CreatePreview(ctx, serverProfile, session, remote.PreviewSpec{
-		Name: request.Name, Ports: ports, LocalTargets: remoteTargets(targets),
+		Name: request.Name, Ports: ports, LocalTargets: reverserelay.RemoteTargets(targets),
 	}, "preview:"+uuid.NewString())
 	if err != nil {
 		return Info{}, err

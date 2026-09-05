@@ -23,68 +23,68 @@ func (handler *Service) normalizeSpec(spec *Spec) *controlplaneapi.Error {
 	spec.ResumeID = strings.TrimSpace(strings.ToLower(spec.ResumeID))
 	if spec.Direction != DirectionUpload &&
 		spec.Direction != DirectionDownload {
-		return invalid("direction", "direction must be upload or download")
+		return controlplaneapi.Invalid("direction", "direction must be upload or download")
 	}
 	if spec.Kind != KindFile && spec.Kind != KindDirectory {
-		return invalid("kind", "kind must be file or directory")
+		return controlplaneapi.Invalid("kind", "kind must be file or directory")
 	}
 	if len(validation.IsDNS1123Subdomain(spec.Pod)) != 0 {
-		return invalid("pod", "Pod name is invalid")
+		return controlplaneapi.Invalid("pod", "Pod name is invalid")
 	}
 	if spec.Container != "" &&
 		len(validation.IsDNS1123Label(spec.Container)) != 0 {
-		return invalid("container", "container name is invalid")
+		return controlplaneapi.Invalid("container", "container name is invalid")
 	}
 	remotePath, err := normalizeRemotePath(
 		spec.RemotePath,
 		handler.allowedRoots,
 	)
 	if err != nil {
-		return invalid("remotePath", err.Error())
+		return controlplaneapi.Invalid("remotePath", err.Error())
 	}
 	spec.RemotePath = remotePath
 	spec.AllowedRoot = matchingAllowedRoot(remotePath, handler.allowedRoots)
 	if spec.AllowedRoot == "" {
-		return invalid(
+		return controlplaneapi.Invalid(
 			"remotePath",
 			"container path is outside the configured allowed roots",
 		)
 	}
 	if spec.Offset > handler.maximumBytes {
-		return invalid("offset", "offset exceeds the configured transfer limit")
+		return controlplaneapi.Invalid("offset", "offset exceeds the configured transfer limit")
 	}
 	switch {
 	case spec.Direction == DirectionUpload:
 		if spec.Size == 0 || spec.Size > handler.maximumBytes ||
 			spec.Offset > spec.Size {
-			return invalid("size", "upload size or offset is invalid")
+			return controlplaneapi.Invalid("size", "upload size or offset is invalid")
 		}
 		if _, err := filestream.ParseChecksum(spec.Checksum); err != nil {
-			return invalid("checksum", err.Error())
+			return controlplaneapi.Invalid("checksum", err.Error())
 		}
 		if spec.Kind == KindDirectory && spec.Offset != 0 {
-			return invalid(
+			return controlplaneapi.Invalid(
 				"offset",
 				"directory upload cannot resume from a byte offset",
 			)
 		}
 		if spec.ResumeID != "" {
 			if spec.Kind != KindFile {
-				return invalid(
+				return controlplaneapi.Invalid(
 					"resumeId",
 					"only file uploads support a Resume ID",
 				)
 			}
 			if _, err := uuid.Parse(spec.ResumeID); err != nil {
-				return invalid("resumeId", "upload Resume ID is invalid")
+				return controlplaneapi.Invalid("resumeId", "upload Resume ID is invalid")
 			}
 		}
 	case spec.Size != 0 || spec.Checksum != "" || spec.Overwrite:
-		return invalid("direction", "download metadata is determined by the Gateway")
+		return controlplaneapi.Invalid("direction", "download metadata is determined by the Gateway")
 	case spec.Kind == KindDirectory && spec.Offset != 0:
-		return invalid("offset", "directory download cannot resume from a byte offset")
+		return controlplaneapi.Invalid("offset", "directory download cannot resume from a byte offset")
 	case spec.ResumeID != "":
-		return invalid("resumeId", "downloads do not accept a Resume ID")
+		return controlplaneapi.Invalid("resumeId", "downloads do not accept a Resume ID")
 	}
 	return nil
 }

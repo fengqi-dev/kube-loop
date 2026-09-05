@@ -10,7 +10,7 @@ const (
 	Type               = "KubeLoop-RelayTicket"
 	Algorithm          = "EdDSA"
 	DefaultLifetime    = time.Minute
-	MaximumLifetime    = 2 * time.Minute
+	MaximumLifetime    = time.Minute
 	DefaultClockSkew   = 15 * time.Second
 	MaximumTicketBytes = 8 << 10
 )
