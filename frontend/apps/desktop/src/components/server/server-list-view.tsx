@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
 import { resourceKey } from "@/components/workspace/workspace-model";
 import { useI18n } from "@/i18n";
@@ -99,7 +100,7 @@ export function ServerListView({
       toast.success("Server is reachable", { description: profile.baseUrl });
     } catch (reason) {
       toast.error("Server test failed", {
-        description: reason instanceof Error ? reason.message : String(reason),
+        description: errorMessage(reason),
       });
     }
   }

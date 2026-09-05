@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useRequestGeneration } from "@/components/workspace/use-request-generation";
 import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
 import { resourceKey } from "@/components/workspace/workspace-model";
@@ -80,11 +81,11 @@ export function SessionsView({ profileId, active = true, selectedNamespace, onNa
       if (results[4].status === "fulfilled") setPreviews(results[4].value);
       setError(results
         .filter((result) => result.status === "rejected")
-        .map((result) => messageOf(result.reason))
+        .map((result) => errorMessage(result.reason))
         .join("\n"));
     } catch (reason) {
       if (!isCurrent()) return;
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       if (isCurrent()) setLoading(false);
     }
@@ -171,10 +172,10 @@ export function SessionsView({ profileId, active = true, selectedNamespace, onNa
       if (results[4].status === "fulfilled") setPreviews(results[4].value);
       setError(results
         .filter((result) => result.status === "rejected")
-        .map((result) => messageOf(result.reason))
+        .map((result) => errorMessage(result.reason))
         .join("\n"));
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       setBusyTasks((current) => {
         const next = new Set(current);
@@ -378,7 +379,6 @@ function stateForBinding(item: ServerTrafficBindingSession) {
   return item.phase ? item.phase.toLocaleLowerCase() : "pending";
 }
 function labelFor(action: Action) { return action === "port-forward" ? "Port Forward" : action[0]!.toUpperCase() + action.slice(1); }
-function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }
 
 type TaskMutation = {
   pause(): Promise<void>;

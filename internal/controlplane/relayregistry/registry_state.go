@@ -1,6 +1,7 @@
 package relayregistry
 
 import (
+	"maps"
 	"slices"
 )
 
@@ -15,7 +16,7 @@ func (registry *Registry) Snapshot() []RelayStatus {
 			Capacity: relay.capacity, AppliedKeyGeneration: relay.appliedKeyGeneration,
 			LeaseExpiresAt: relay.leaseExpiresAt, LastHeartbeatAt: relay.lastHeartbeatAt,
 			Reservations: relay.reservations, Online: relay.leaseExpiresAt.After(now),
-			Topology: cloneMap(relay.identity.Topology),
+			Topology: maps.Clone(relay.identity.Topology),
 		})
 	}
 	slices.SortFunc(result, func(left, right RelayStatus) int {

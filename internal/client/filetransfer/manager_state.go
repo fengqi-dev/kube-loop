@@ -51,7 +51,7 @@ func (manager *Manager) load() error {
 	}
 	manager.persistMu.Lock()
 	defer manager.persistMu.Unlock()
-	return manager.persist(cloneTasks(manager.tasks))
+	return manager.persist(maps.Clone(manager.tasks))
 }
 
 func normalizePersistedTask(task *Task) error {
@@ -134,10 +134,6 @@ func (manager *Manager) persist(tasks map[string]Task) error {
 		writeFile = utils.WriteFile
 	}
 	return writeFile(manager.statePath, contents, 0o700, 0o600)
-}
-
-func cloneTasks(tasks map[string]Task) map[string]Task {
-	return maps.Clone(tasks)
 }
 
 func validateManagerRemotePath(value string) error {

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useRequestGeneration } from "@/components/workspace/use-request-generation";
 import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
 import { resourceKey } from "@/components/workspace/workspace-model";
@@ -70,11 +71,11 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
       }
       const failures = [endpoints, activeForwards]
         .filter((result) => result.status === "rejected")
-        .map((result) => messageOf(result.reason));
+        .map((result) => errorMessage(result.reason));
       setError(failures.join("\n"));
     } catch (reason) {
       if (!isCurrent()) return;
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       if (isCurrent()) setLoading(false);
     }
@@ -143,7 +144,7 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
       setRemotePort("");
       setLocalPort("");
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
@@ -158,7 +159,7 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
       setSSHEndpoints((current) => [...current.filter((item) => item.id !== endpoint!.id), endpoint!]);
       await backend.openServerPodSSH(profileId, endpoint.id);
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
@@ -307,4 +308,3 @@ export function ServerWorkloadView({ profileId, active = true, selectedNamespace
 function StatusPill({ ok, label }: { ok: boolean; label: string }) {
   return <span className={cn("inline-flex items-center gap-1.5 text-[12px]", ok ? "text-success" : "text-muted-foreground")}><Circle size={8} className={ok ? "fill-success text-success" : "fill-muted-foreground/50 text-muted-foreground/50"} />{label}</span>;
 }
-function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }

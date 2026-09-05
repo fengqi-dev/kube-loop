@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -54,7 +55,7 @@ export function HostAliasesView({
       .catch((error) => {
         if (!active || generation !== contextGeneration.current) return;
         toast.error(t("hosts.loadFailed"), {
-          description: error instanceof Error ? error.message : String(error),
+          description: errorMessage(error),
         });
         setRows([]);
       })
@@ -95,7 +96,7 @@ export function HostAliasesView({
     } catch (error) {
       if (generation !== contextGeneration.current) return false;
       toast.error(t("hosts.saveFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
       return false;
     } finally {

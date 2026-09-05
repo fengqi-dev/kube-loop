@@ -107,7 +107,7 @@ func (handlers Handlers[S, D]) Create(
 		ctx.Response().Header().Set("Idempotent-Replayed", "true")
 		status = http.StatusOK
 	}
-	WriteJSON(ctx, status, handlers.Document(current, session))
+	taskapi.WriteJSON(ctx, status, handlers.Document(current, session))
 	return nil
 }
 
@@ -121,7 +121,7 @@ func (handlers Handlers[S, D]) Get(
 	if apiError != nil {
 		return apiError
 	}
-	WriteJSON(ctx, http.StatusOK, handlers.Document(binding, session))
+	taskapi.WriteJSON(ctx, http.StatusOK, handlers.Document(binding, session))
 	return nil
 }
 
@@ -144,7 +144,7 @@ func (handlers Handlers[S, D]) List(
 			items = append(items, handlers.Document(&stored[index], session))
 		}
 	}
-	WriteJSON(ctx, http.StatusOK, ListDocument[D]{Items: items})
+	taskapi.WriteJSON(ctx, http.StatusOK, ListDocument[D]{Items: items})
 	return nil
 }
 
@@ -172,7 +172,7 @@ func (handlers Handlers[S, D]) Pause(
 	if err != nil {
 		return handlers.Task.Errors().Internal(err)
 	}
-	WriteJSON(ctx, http.StatusOK, handlers.Document(binding, session))
+	taskapi.WriteJSON(ctx, http.StatusOK, handlers.Document(binding, session))
 	return nil
 }
 
@@ -199,7 +199,7 @@ func (handlers Handlers[S, D]) Resume(
 		return handlers.Task.Errors().Internal(err)
 	}
 	binding, _ = bindings.GetSession(ctx.Request().Context(), session.Namespace, taskID)
-	WriteJSON(ctx, http.StatusAccepted, handlers.Document(binding, session))
+	taskapi.WriteJSON(ctx, http.StatusAccepted, handlers.Document(binding, session))
 	return nil
 }
 
@@ -221,7 +221,7 @@ func (handlers Handlers[S, D]) Delete(
 	); err != nil {
 		return handlers.Task.Errors().Internal(err)
 	}
-	WriteJSON(ctx, http.StatusOK, document)
+	taskapi.WriteJSON(ctx, http.StatusOK, document)
 	return nil
 }
 

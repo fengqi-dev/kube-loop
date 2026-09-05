@@ -82,7 +82,7 @@ func compareRatio(leftValue, leftMaximum, rightValue, rightMaximum uint32) int {
 func cloneIdentity(
 	identity relaycontrol.PeerIdentity,
 ) relaycontrol.PeerIdentity {
-	identity.Topology = cloneMap(identity.Topology)
+	identity.Topology = maps.Clone(identity.Topology)
 	return identity
 }
 
@@ -92,13 +92,4 @@ func cloneKeys(
 	copyKeys := keys
 	copyKeys.Keys = append([]relaycontrol.VerificationKey(nil), keys.Keys...)
 	return copyKeys
-}
-
-func cloneMap(source map[string]string) map[string]string {
-	if source == nil {
-		return nil
-	}
-	result := make(map[string]string, len(source))
-	maps.Copy(result, source)
-	return result
 }

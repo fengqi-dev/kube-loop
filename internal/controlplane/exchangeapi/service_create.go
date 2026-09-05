@@ -24,14 +24,14 @@ func (handler *Service) newBinding(
 		ctx, identity, session.Namespace, spec.Service, spec.Ports,
 	)
 	if err != nil {
-		return nil, targetError(err)
+		return nil, apiErrors.Target(err)
 	}
 	binding, err := trafficbindingclient.NewPendingInterceptBinding(
 		task.Mode, owner, session.Namespace, resolved.Name, resolved.ClusterIP,
 		resolved.Ports, spec.LocalTargets,
 	)
 	if err != nil {
-		return nil, internalError(err)
+		return nil, apiErrors.Internal(err)
 	}
 	return binding, nil
 }

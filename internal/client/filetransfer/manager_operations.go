@@ -3,6 +3,7 @@ package filetransfer
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"strings"
 
@@ -104,7 +105,7 @@ func (manager *Manager) Resume(
 		manager.persistMu.Unlock()
 		return Task{}, errors.New("file transfer is not resumable")
 	}
-	nextTasks := cloneTasks(manager.tasks)
+	nextTasks := maps.Clone(manager.tasks)
 	manager.mu.Unlock()
 	request := Request{
 		ProfileID: profileID, Direction: task.Direction, Kind: task.Kind, Pod: task.Pod, Container: task.Container,
@@ -170,7 +171,7 @@ func (manager *Manager) ClearHistory(profileID string) error {
 	defer manager.persistMu.Unlock()
 	manager.mu.Lock()
 	removed := make([]string, 0)
-	nextTasks := cloneTasks(manager.tasks)
+	nextTasks := maps.Clone(manager.tasks)
 	active := make(map[string]struct{}, len(manager.active))
 	for id := range manager.active {
 		active[id] = struct{}{}
@@ -205,7 +206,7 @@ func (manager *Manager) Shutdown() error {
 	manager.persistMu.Lock()
 	defer manager.persistMu.Unlock()
 	manager.mu.Lock()
-	tasks := cloneTasks(manager.tasks)
+	tasks := maps.Clone(manager.tasks)
 	manager.mu.Unlock()
 	return manager.persist(tasks)
 }

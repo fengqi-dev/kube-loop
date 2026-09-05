@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { backend } from "@/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -49,7 +50,7 @@ export function ServerFileTransfer({
         : await backend.pickServerDownloadPath(kind, remotePath.split("/").filter(Boolean).at(-1) || "download");
       if (selected) setLocalPath(selected);
     } catch (reason) {
-      onError(messageOf(reason));
+      onError(errorMessage(reason));
     }
   }
 
@@ -65,7 +66,7 @@ export function ServerFileTransfer({
         remotePath: remotePath.trim(), overwrite,
       });
     } catch (reason) {
-      onError(messageOf(reason));
+      onError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
@@ -173,8 +174,4 @@ export function ServerFileTransfer({
 
     </div>
   );
-}
-
-function messageOf(reason: unknown) {
-  return reason instanceof Error ? reason.message : String(reason);
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/filestream"
@@ -12,7 +13,7 @@ import (
 func (manager *Manager) launch(ctx context.Context, task Task, entry *activeTransfer) error {
 	manager.persistMu.Lock()
 	manager.mu.Lock()
-	nextTasks := cloneTasks(manager.tasks)
+	nextTasks := maps.Clone(manager.tasks)
 	manager.mu.Unlock()
 	return manager.launchPrepared(ctx, task, entry, nextTasks)
 }
@@ -83,7 +84,7 @@ func (manager *Manager) update(taskID string, mutate func(*Task)) error {
 		manager.persistMu.Unlock()
 		return nil
 	}
-	nextTasks := cloneTasks(manager.tasks)
+	nextTasks := maps.Clone(manager.tasks)
 	manager.mu.Unlock()
 	mutate(&task)
 	task.UpdatedAt = manager.now().UTC()
@@ -109,7 +110,7 @@ func (manager *Manager) finish(taskID string, result filestream.TransferResult, 
 		manager.persistMu.Unlock()
 		return
 	}
-	nextTasks := cloneTasks(manager.tasks)
+	nextTasks := maps.Clone(manager.tasks)
 	manager.mu.Unlock()
 	now := manager.now().UTC()
 	task.UpdatedAt = now

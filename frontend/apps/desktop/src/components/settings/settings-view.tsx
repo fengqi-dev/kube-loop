@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useEffect, useState } from "react";
 import {
   Check,
@@ -94,7 +95,7 @@ export function SettingsView({
       });
     } catch (error) {
       toast.error(t("settings.logLevel"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     }
   }
@@ -103,7 +104,7 @@ export function SettingsView({
       setHelper(await backend.helperStatus());
     } catch (error) {
       if (showError) toast.error(t("settings.helperLoadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     }
   }
@@ -122,7 +123,7 @@ export function SettingsView({
       toast.success(t("settings.helperInstallOk"));
     } catch (error) {
       toast.error(t("settings.helperInstallFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setHelperBusy(false);
@@ -137,7 +138,7 @@ export function SettingsView({
       toast.success(t("settings.helperUninstallOk"));
     } catch (error) {
       toast.error(t("settings.helperUninstallFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setHelperBusy(false);
@@ -157,7 +158,7 @@ export function SettingsView({
       setConfigOpen(true);
     } catch (error) {
       toast.error(t("settings.configLoadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setConfigBusy(null);
@@ -185,7 +186,7 @@ export function SettingsView({
       setConfigOpen(true);
     } catch (error) {
       toast.error(t("settings.dnsConfigLoadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setConfigBusy(null);
@@ -198,7 +199,7 @@ export function SettingsView({
       toast.success(t("settings.configCopied"));
     } catch (error) {
       toast.error(t("settings.configLoadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     }
   }

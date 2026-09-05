@@ -36,25 +36,25 @@ func (handler *Service) Prepare(
 	}
 	if err := handler.resources.Capture(ctx, identity, &snapshot); err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("capture Mirror Service: %w", err))
+			apiErrors.Internal(fmt.Errorf("capture Mirror Service: %w", err))
 	}
 	backendSets, err := servicebinding.ResolveSnapshotBackends(snapshot)
 	if err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("resolve Mirror backends: %w", err))
+			apiErrors.Internal(fmt.Errorf("resolve Mirror backends: %w", err))
 	}
 	sessions, err := handler.bindingSessions()
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	if err := sessions.AttachRelay(
 		ctx, binding, relayID, request.GatewayIP, trafficapi.ListenerPorts(request.Ports),
 	); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	if err := handler.resources.Apply(ctx, identity, snapshot, binding.Spec.TaskID); err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("apply Mirror binding: %w", err))
+			apiErrors.Internal(fmt.Errorf("apply Mirror binding: %w", err))
 	}
 	return trafficcontrol.PrepareResponse{Backends: originalBackends(backendSets)}, nil
 }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { useEffect, useState } from "react";
 import { Copy, Minus, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -36,7 +37,7 @@ export function MCPView() {
       setMcpPort(String(status.port || 30808));
     } catch (error) {
       toast.error(t("mcp.loadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     }
   }
@@ -54,7 +55,7 @@ export function MCPView() {
       toast.success(mcp.enabled ? t("mcp.disabledOk") : t("mcp.enabledOk"));
     } catch (error) {
       toast.error(t("mcp.failed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setMcpBusy(false);
@@ -72,7 +73,7 @@ export function MCPView() {
       );
     } catch (error) {
       toast.error(t("mcp.failed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setMcpBusy(false);
@@ -97,7 +98,7 @@ export function MCPView() {
     } catch (error) {
       setMcpPort(String(mcp.port || 30808));
       toast.error(t("mcp.failed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setMcpBusy(false);
@@ -130,7 +131,7 @@ export function MCPView() {
       toast.success(t("mcp.tokenOk"));
     } catch (error) {
       toast.error(t("mcp.failed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setMcpBusy(false);
@@ -147,7 +148,7 @@ export function MCPView() {
       });
     } catch (error) {
       toast.error(t("mcp.installFailed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     } finally {
       setMcpBusy(false);
@@ -163,7 +164,7 @@ export function MCPView() {
       toast.success(t(okKey));
     } catch (error) {
       toast.error(t("mcp.failed"), {
-        description: error instanceof Error ? error.message : String(error),
+        description: errorMessage(error),
       });
     }
   }

@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { ToolbarActions } from "@/components/workspace/toolbar-actions";
 import { useRequestGeneration } from "@/components/workspace/use-request-generation";
 import { ResourceWorkspace, useResourceWorkspace } from "@/components/workspace/resource-workspace";
@@ -76,11 +77,11 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
       if (nextPreviews.status === "fulfilled") setPreviews(nextPreviews.value);
       const failures = [nextForwards, nextExchanges, nextMirrors, nextPreviews]
         .filter((result) => result.status === "rejected")
-        .map((result) => messageOf(result.reason));
+        .map((result) => errorMessage(result.reason));
       setError(failures.join("\n"));
     } catch (reason) {
       if (!isCurrent()) return;
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally {
       if (isCurrent()) setLoading(false);
     }
@@ -152,7 +153,7 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
       }
       setAction(undefined); setService(undefined);
     } catch (reason) {
-      setError(messageOf(reason));
+      setError(errorMessage(reason));
     } finally { setBusy(false); }
   }
 
@@ -452,7 +453,6 @@ export function ServerNetworkView({ profileId, active = true, selectedNamespace,
 
 function protocolFor(service: RemoteService, port: number): "tcp" | "udp" { return service.ports.find((item) => item.port === port)?.protocol.toLowerCase() === "udp" ? "udp" : "tcp"; }
 function labelFor(action: Action) { return action === "port-forward" ? "Port Forward" : action[0]!.toUpperCase() + action.slice(1); }
-function messageOf(reason: unknown) { return reason instanceof Error ? reason.message : String(reason); }
 function upsertTask<T extends { id: string }>(items: T[], task: T) {
   return [...items.filter((item) => item.id !== task.id), task];
 }

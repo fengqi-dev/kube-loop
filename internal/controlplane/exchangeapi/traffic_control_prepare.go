@@ -35,20 +35,20 @@ func (handler *Service) Prepare(
 	}
 	if err := handler.resources.Capture(ctx, identity, &snapshot); err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("capture Exchange Service: %w", err))
+			apiErrors.Internal(fmt.Errorf("capture Exchange Service: %w", err))
 	}
 	sessions, err := handler.bindingSessions()
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	if err := sessions.AttachRelay(
 		ctx, binding, relayID, request.GatewayIP, trafficapi.ListenerPorts(request.Ports),
 	); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	if err := handler.resources.Apply(ctx, identity, snapshot, binding.Spec.TaskID); err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("apply Exchange binding: %w", err))
+			apiErrors.Internal(fmt.Errorf("apply Exchange binding: %w", err))
 	}
 	return trafficcontrol.PrepareResponse{}, nil
 }

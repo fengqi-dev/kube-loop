@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -162,7 +163,7 @@ func TestManagerClearHistoryWriteFailureRestoresTasks(t *testing.T) {
 	manager.tasks[task.ID] = task
 	manager.mu.Unlock()
 	manager.persistMu.Lock()
-	if err := manager.persist(cloneTasks(manager.tasks)); err != nil {
+	if err := manager.persist(maps.Clone(manager.tasks)); err != nil {
 		manager.persistMu.Unlock()
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestManagerMarksTerminalPersistenceFailureAndRetriesOnShutdown(t *testing.T
 	manager.active[task.ID] = &activeTransfer{}
 	manager.mu.Unlock()
 	manager.persistMu.Lock()
-	if err := manager.persist(cloneTasks(manager.tasks)); err != nil {
+	if err := manager.persist(maps.Clone(manager.tasks)); err != nil {
 		manager.persistMu.Unlock()
 		t.Fatal(err)
 	}

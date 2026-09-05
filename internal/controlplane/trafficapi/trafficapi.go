@@ -14,7 +14,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/labstack/echo/v5"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -45,9 +44,9 @@ func (reporter Errors) Target(err error) *controlplaneapi.Error {
 			Cause:   err,
 		}
 	case apierrors.IsNotFound(err):
-		return NotFound()
+		return controlplaneapi.NotFound()
 	default:
-		return Invalid("service", err.Error())
+		return controlplaneapi.Invalid("service", err.Error())
 	}
 }
 
@@ -56,7 +55,7 @@ func (reporter Errors) Target(err error) *controlplaneapi.Error {
 func (reporter Errors) Storage(err error) *controlplaneapi.Error {
 	switch {
 	case errors.Is(err, storage.ErrNotFound):
-		return NotFound()
+		return controlplaneapi.NotFound()
 	case errors.Is(err, storage.ErrConflict),
 		errors.Is(err, storage.ErrIdempotencyMismatch),
 		errors.Is(err, trafficbindingclient.ErrTrafficBindingConflict):
@@ -79,18 +78,6 @@ func (reporter Errors) Internal(err error) *controlplaneapi.Error {
 	}
 }
 
-// Invalid rejects one named request field.
-func Invalid(field, message string) *controlplaneapi.Error {
-	return controlplaneapi.Invalid(field, message)
-}
-
-// NotFound reports a resource the caller may not learn anything about.
-func NotFound() *controlplaneapi.Error { return controlplaneapi.NotFound() }
-
-func WriteJSON(ctx *echo.Context, status int, value any) {
-	_ = ctx.JSON(status, value)
-}
-
 // NormalizeLocalTargets trims, defaults and sorts the local targets in place,
 // rejecting any that does not pair with exactly one of the Service ports.
 func NormalizeLocalTargets(
@@ -101,7 +88,7 @@ func NormalizeLocalTargets(
 		return nil
 	}
 	if len(*targets) != len(ports) {
-		return Invalid("localTargets", "local targets must match Service ports")
+		return controlplaneapi.Invalid("localTargets", "local targets must match Service ports")
 	}
 	expected := make(map[string]struct{}, len(ports))
 	for _, port := range ports {
@@ -124,7 +111,7 @@ func NormalizeLocalTargets(
 		if target.ServicePort < 1 || target.ServicePort > 65535 || target.LocalPort < 1 ||
 			(target.Protocol != "tcp" && target.Protocol != "udp") ||
 			invalidHost || !matchesPort || duplicate {
-			return Invalid("localTargets", "local target is invalid")
+			return controlplaneapi.Invalid("localTargets", "local target is invalid")
 		}
 		seen[key] = struct{}{}
 	}

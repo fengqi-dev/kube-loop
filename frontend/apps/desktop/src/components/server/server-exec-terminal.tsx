@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { backend } from "@/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,11 +57,11 @@ export function ServerExecTerminal({
       if (!current) return;
       inputQueueRef.current = inputQueueRef.current
         .then(() => backend.writeServerExecInput(profileId, current.id, data))
-        .catch((reason: unknown) => onError(messageOf(reason)));
+        .catch((reason: unknown) => onError(errorMessage(reason)));
     });
     const resizeSubscription = terminal.onResize(({ cols, rows }) => {
       const current = activeTaskRef.current;
-      if (current) void backend.resizeServerExec(profileId, current.id, cols, rows).catch((reason: unknown) => onError(messageOf(reason)));
+      if (current) void backend.resizeServerExec(profileId, current.id, cols, rows).catch((reason: unknown) => onError(errorMessage(reason)));
     });
     const observer = new ResizeObserver(() => fit.fit());
     observer.observe(hostRef.current);
@@ -125,8 +126,8 @@ export function ServerExecTerminal({
       pending.forEach(handleEvent);
       terminalRef.current.focus();
     } catch (reason) {
-      onError(messageOf(reason));
-      terminalRef.current.writeln(`\r\n[failed to start terminal: ${messageOf(reason)}]`);
+      onError(errorMessage(reason));
+      terminalRef.current.writeln(`\r\n[failed to start terminal: ${errorMessage(reason)}]`);
     } finally {
       setBusy(false);
     }
@@ -142,7 +143,7 @@ export function ServerExecTerminal({
       activeTaskRef.current = undefined;
       setTask(undefined);
     } catch (reason) {
-      onError(messageOf(reason));
+      onError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
@@ -204,8 +205,4 @@ function decodeBase64(value: string) {
   const bytes = new Uint8Array(decoded.length);
   for (let index = 0; index < decoded.length; index += 1) bytes[index] = decoded.charCodeAt(index);
   return bytes;
-}
-
-function messageOf(reason: unknown) {
-  return reason instanceof Error ? reason.message : String(reason);
 }

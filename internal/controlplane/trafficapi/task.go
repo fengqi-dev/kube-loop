@@ -98,14 +98,14 @@ func (relay Relay) OwnedBinding(
 		return nil, apiError
 	}
 	if _, err := uuid.Parse(taskID); err != nil {
-		return nil, NotFound()
+		return nil, controlplaneapi.NotFound()
 	}
 	binding, err := bindings.GetSession(ctx, session.Namespace, taskID)
 	if err != nil || !relay.Task.Owns(binding, identity, session) {
 		if err != nil && !errors.Is(err, trafficbindingclient.ErrTrafficBindingNotFound) {
 			return nil, relay.Task.Errors().Internal(err)
 		}
-		return nil, NotFound()
+		return nil, controlplaneapi.NotFound()
 	}
 	return binding, nil
 }
@@ -120,7 +120,7 @@ func (relay Relay) relayBinding(
 ) (*trafficv1alpha1.TrafficBinding, *controlplaneapi.Error) {
 	binding, err := bindings.FindSession(ctx, taskID)
 	if err != nil || binding.Spec.Mode != relay.Task.Mode {
-		return nil, NotFound()
+		return nil, controlplaneapi.NotFound()
 	}
 	if binding.Status.RelayOwnerID != relayID {
 		return nil, relay.Task.conflict(relay.Task.OwnershipMessage())

@@ -9,6 +9,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	"github.com/fengqi-dev/kube-loop/internal/client/reverserelay"
 	"github.com/fengqi-dev/kube-loop/internal/client/taskrelay"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 )
@@ -90,7 +91,7 @@ func (manager *Manager) Start(
 		return Info{}, err
 	}
 	task, err := manager.client.CreateMirror(ctx, serverProfile, session, remote.MirrorSpec{
-		Service: strings.TrimSpace(request.Service), Ports: ports, LocalTargets: remoteTargets(targets),
+		Service: strings.TrimSpace(request.Service), Ports: ports, LocalTargets: reverserelay.RemoteTargets(targets),
 	}, "mirror:"+uuid.NewString())
 	if err != nil {
 		return Info{}, err

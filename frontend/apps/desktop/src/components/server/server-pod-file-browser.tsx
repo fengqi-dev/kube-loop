@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import { backend } from "@/backend";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -37,7 +38,7 @@ export function ServerPodFileBrowser({
       setPath(listing.path);
       setItems(listing.items);
     } catch (reason) {
-      onError(messageOf(reason));
+      onError(errorMessage(reason));
     } finally {
       setBusy(false);
     }
@@ -73,7 +74,7 @@ export function ServerPodFileBrowser({
       setBusy(false);
       await load(path);
     } catch (reason) {
-      onError(messageOf(reason));
+      onError(errorMessage(reason));
       setBusy(false);
     }
   }
@@ -136,8 +137,4 @@ function parentPath(value: string) {
 
 function validName(value: string | null): value is string {
   return Boolean(value && value !== "." && value !== ".." && !/[\\/\u0000-\u001f\u007f]/.test(value));
-}
-
-function messageOf(reason: unknown) {
-  return reason instanceof Error ? reason.message : String(reason);
 }

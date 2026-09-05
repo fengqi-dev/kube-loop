@@ -1,3 +1,4 @@
+import { errorMessage } from "@/lib/errors";
 import {
   useCallback,
   useEffect,
@@ -1045,9 +1046,6 @@ function baseName(value: string) {
   return value.split(/[\\/]/).filter(Boolean).pop() ?? value;
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function serverLocalEntry(entry: ServerLocalFileEntry): FileEntry {
   return {

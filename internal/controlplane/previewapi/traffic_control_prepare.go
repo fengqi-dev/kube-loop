@@ -35,21 +35,21 @@ func (handler *Service) Prepare(
 	}
 	sessions, err := handler.bindingSessions()
 	if err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	if err := sessions.AttachRelay(
 		ctx, binding, relayID, request.GatewayIP, trafficapi.ListenerPorts(request.Ports),
 	); err != nil {
-		return trafficcontrol.PrepareResponse{}, internalError(err)
+		return trafficcontrol.PrepareResponse{}, apiErrors.Internal(err)
 	}
 	service, err := handler.resources.Create(ctx, identity, snapshot, binding.Spec.TaskID)
 	if err != nil {
 		return trafficcontrol.PrepareResponse{},
-			internalError(fmt.Errorf("create Preview binding: %w", err))
+			apiErrors.Internal(fmt.Errorf("create Preview binding: %w", err))
 	}
 	if service == nil || service.Spec.ClusterIP == "" {
 		return trafficcontrol.PrepareResponse{},
-			internalError(errors.New("created Preview Service has no ClusterIP"))
+			apiErrors.Internal(errors.New("created Preview Service has no ClusterIP"))
 	}
 	return trafficcontrol.PrepareResponse{ClusterIP: service.Spec.ClusterIP}, nil
 }
