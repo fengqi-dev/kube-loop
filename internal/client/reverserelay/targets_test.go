@@ -18,7 +18,11 @@ func TestNormalizeTargets(t *testing.T) {
 			tests := []testCase{
 				{name: "nil", message: "requires one to 64 local targets"},
 				{name: "empty", input: []Target{}, message: "requires one to 64 local targets"},
-				{name: "defaults", input: []Target{{ServicePort: 80}}, want: []Target{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 80}}},
+				{
+					name:  "defaults",
+					input: []Target{{ServicePort: 80}},
+					want:  []Target{{ServicePort: 80, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 80}},
+				},
 				{name: "normalize and preserve order", input: []Target{
 					{ServicePort: 65535, Protocol: " UDP ", LocalHost: " ::1 ", LocalPort: 53},
 					{ServicePort: 1, Protocol: " TCP ", LocalHost: " localhost "},
@@ -27,25 +31,62 @@ func TestNormalizeTargets(t *testing.T) {
 					{ServicePort: 1, Protocol: "tcp", LocalHost: "localhost", LocalPort: 1},
 				}},
 				{name: "zero port", input: []Target{{ServicePort: 0}}, message: "local target is invalid"},
-				{name: "negative port", input: []Target{{ServicePort: -1, LocalPort: 80}}, message: "local target is invalid"},
+				{
+					name:    "negative port",
+					input:   []Target{{ServicePort: -1, LocalPort: 80}},
+					message: "local target is invalid",
+				},
 				{name: "overflow port", input: []Target{{ServicePort: 65536}}, message: "local target is invalid"},
-				{name: "unsupported protocol", input: []Target{{ServicePort: 80, Protocol: "sctp"}}, message: "local target is invalid"},
-				{name: "unspecified host", input: []Target{{ServicePort: 80, LocalHost: "0.0.0.0"}}, message: "local target is invalid"},
-				{name: "multicast host", input: []Target{{ServicePort: 80, LocalHost: "224.0.0.1"}}, message: "local target is invalid"},
-				{name: "invalid host", input: []Target{{ServicePort: 80, LocalHost: "bad host"}}, message: "local target is invalid"},
-				{name: "normalized duplicate", input: []Target{{ServicePort: 80}, {ServicePort: 80, Protocol: " TCP "}}, message: "Service ports must be unique"},
-				{name: "invalid before duplicate", input: []Target{{ServicePort: 80}, {ServicePort: 80, LocalHost: "bad host"}}, message: "local target is invalid"},
-				{name: "same port different protocols", input: []Target{{ServicePort: 53}, {ServicePort: 53, Protocol: "udp"}}, want: []Target{
-					{ServicePort: 53, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 53},
-					{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: 53},
-				}},
+				{
+					name:    "unsupported protocol",
+					input:   []Target{{ServicePort: 80, Protocol: "sctp"}},
+					message: "local target is invalid",
+				},
+				{
+					name:    "unspecified host",
+					input:   []Target{{ServicePort: 80, LocalHost: "0.0.0.0"}},
+					message: "local target is invalid",
+				},
+				{
+					name:    "multicast host",
+					input:   []Target{{ServicePort: 80, LocalHost: "224.0.0.1"}},
+					message: "local target is invalid",
+				},
+				{
+					name:    "invalid host",
+					input:   []Target{{ServicePort: 80, LocalHost: "bad host"}},
+					message: "local target is invalid",
+				},
+				{
+					name:    "normalized duplicate",
+					input:   []Target{{ServicePort: 80}, {ServicePort: 80, Protocol: " TCP "}},
+					message: "Service ports must be unique",
+				},
+				{
+					name:    "invalid before duplicate",
+					input:   []Target{{ServicePort: 80}, {ServicePort: 80, LocalHost: "bad host"}},
+					message: "local target is invalid",
+				},
+				{
+					name:  "same port different protocols",
+					input: []Target{{ServicePort: 53}, {ServicePort: 53, Protocol: "udp"}},
+					want: []Target{
+						{ServicePort: 53, Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: 53},
+						{ServicePort: 53, Protocol: "udp", LocalHost: "127.0.0.1", LocalPort: 53},
+					},
+				},
 			}
 			for _, count := range []int{64, 65} {
 				input := make([]Target, count)
 				want := make([]Target, count)
 				for i := range input {
 					input[i] = Target{ServicePort: int32(i + 1)}
-					want[i] = Target{ServicePort: int32(i + 1), Protocol: "tcp", LocalHost: "127.0.0.1", LocalPort: uint16(i + 1)}
+					want[i] = Target{
+						ServicePort: int32(i + 1),
+						Protocol:    "tcp",
+						LocalHost:   "127.0.0.1",
+						LocalPort:   uint16(i + 1),
+					}
 				}
 				if count == 64 {
 					tests = append(tests, testCase{"64 targets", input, want, ""})

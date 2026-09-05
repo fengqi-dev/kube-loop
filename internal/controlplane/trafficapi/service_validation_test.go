@@ -40,14 +40,33 @@ func TestNormalizeServicePortsErrors(t *testing.T) {
 		{"no ports", "api", nil, "ports", "one to 64 Service ports are required"},
 		{"too many ports", "api", make([]servicemodel.Port, 65), "ports", "one to 64 Service ports are required"},
 		{"zero port", "api", []servicemodel.Port{{Protocol: "tcp"}}, "ports", "Service port and protocol are invalid"},
-		{"overflow port", "api", []servicemodel.Port{{ServicePort: 65536, Protocol: "tcp"}}, "ports", "Service port and protocol are invalid"},
-		{"missing protocol", "api", []servicemodel.Port{{ServicePort: 80}}, "ports", "Service port and protocol are invalid"},
-		{"duplicate", "api", []servicemodel.Port{{ServicePort: 80, Protocol: "tcp"}, {ServicePort: 80, Protocol: " TCP "}}, "ports", "Service ports must be unique"},
+		{
+			"overflow port",
+			"api",
+			[]servicemodel.Port{{ServicePort: 65536, Protocol: "tcp"}},
+			"ports",
+			"Service port and protocol are invalid",
+		},
+		{
+			"missing protocol",
+			"api",
+			[]servicemodel.Port{{ServicePort: 80}},
+			"ports",
+			"Service port and protocol are invalid",
+		},
+		{
+			"duplicate",
+			"api",
+			[]servicemodel.Port{{ServicePort: 80, Protocol: "tcp"}, {ServicePort: 80, Protocol: " TCP "}},
+			"ports",
+			"Service ports must be unique",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := trafficapi.NormalizeServicePorts(&tt.service, tt.ports)
-			if err == nil || err.Code != controlplaneapi.CodeInvalidArgument || err.Field != tt.field || err.Message != tt.message {
+			if err == nil || err.Code != controlplaneapi.CodeInvalidArgument || err.Field != tt.field ||
+				err.Message != tt.message {
 				t.Fatalf("error=%#v, want %s: %s", err, tt.field, tt.message)
 			}
 		})

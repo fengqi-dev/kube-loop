@@ -26,7 +26,8 @@ func TestTargetConversions(t *testing.T) {
 	}
 	wire[0].LocalHost = "changed"
 	restored[1].LocalPort = 1
-	if local[0].LocalHost != "localhost" || local[1].LocalPort != 5353 || restored[0].LocalHost != "localhost" || wire[1].LocalPort != 5353 {
+	if local[0].LocalHost != "localhost" || local[1].LocalPort != 5353 || restored[0].LocalHost != "localhost" ||
+		wire[1].LocalPort != 5353 {
 		t.Fatal("conversions must return independent copies")
 	}
 	for _, input := range [][]Target{nil, {}} {
