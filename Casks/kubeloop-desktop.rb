@@ -21,10 +21,9 @@ cask "kubeloop-desktop" do
 
   # Unsigned / unnotarized builds trip Gatekeeper via com.apple.quarantine.
   # Clear it after install so users do not need a manual xattr.
-  postflight do
-    system_command "/usr/bin/xattr",
-                   args: ["-dr", "com.apple.quarantine", "#{appdir}/KubeLoop.app"],
-                   sudo: false
+  postflight_steps do
+    run "/usr/bin/xattr",
+        args: ["-dr", "com.apple.quarantine", "{{appdir}}/KubeLoop.app"]
   end
 
   zap trash: [
