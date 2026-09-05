@@ -7,7 +7,6 @@ import (
 	"errors"
 	"log/slog"
 	"net"
-	"net/netip"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -61,7 +60,7 @@ func (connection *stubbornGatewayConnection) Close() error {
 
 func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
 	var logs bytes.Buffer
-	server := NewServer(slog.New(slog.NewJSONHandler(&logs, nil)), time.Second)
+	server := NewServer(slog.New(slog.NewJSONHandler(&logs, nil)))
 	client, gatewayConnection := net.Pipe()
 	defer func() { _ = client.Close() }()
 	server.ServeConnForAuthorization(gatewayConnection, SessionAuthorization{
@@ -77,23 +76,8 @@ func TestServeConnForAuthorizationLogsRequestID(t *testing.T) {
 	}
 }
 
-func TestClusterAddressPolicy(t *testing.T) {
-	allowed := []string{"10.0.0.1", "172.16.1.2", "192.168.10.2", "fd00::1"}
-	for _, raw := range allowed {
-		if !isClusterAddress(netip.MustParseAddr(raw)) {
-			t.Errorf("expected %s to be allowed", raw)
-		}
-	}
-	denied := []string{"127.0.0.1", "8.8.8.8", "169.254.1.1", "::1"}
-	for _, raw := range denied {
-		if isClusterAddress(netip.MustParseAddr(raw)) {
-			t.Errorf("expected %s to be denied", raw)
-		}
-	}
-}
-
 func TestDrainWaitsForActiveConnection(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	client, gatewayConnection := net.Pipe()
 	defer func() { _ = client.Close() }()
 	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
@@ -118,7 +102,7 @@ func TestDrainWaitsForActiveConnection(t *testing.T) {
 }
 
 func TestDrainDeadlineClosesActiveConnections(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	client, gatewayConnection := net.Pipe()
 	defer func() { _ = client.Close() }()
 	go server.ServeConnForAuthorization(gatewayConnection, gatewayTestAuthorization(t))
@@ -133,7 +117,7 @@ func TestDrainDeadlineClosesActiveConnections(t *testing.T) {
 }
 
 func TestDrainDeadlineDoesNotWaitForStubbornHandler(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	connection := &stubbornGatewayConnection{}
 	if !server.trackConnection(connection) {
 		t.Fatal("failed to track test connection")
@@ -169,7 +153,7 @@ func TestDrainDeadlineDoesNotWaitForStubbornHandler(t *testing.T) {
 }
 
 func TestBeginDrainRejectsNewConnections(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	server.BeginDrain()
 	client, gatewayConnection := net.Pipe()
 	authorization := gatewayTestAuthorization(t)
@@ -199,7 +183,7 @@ func gatewayTestAuthorization(t *testing.T) SessionAuthorization {
 }
 
 func TestAuthenticatedWebSocketSessionRejectsMismatchedProtocolTenant(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	client, gatewayConnection := net.Pipe()
 	done := make(chan struct{})
 	spec, specHash := gatewayTestNetworkSpec(t)
@@ -231,7 +215,7 @@ func TestAuthenticatedWebSocketSessionRejectsMismatchedProtocolTenant(t *testing
 }
 
 func TestAuthenticatedWebSocketSessionAcceptsBoundProtocolTenant(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	client, gatewayConnection := net.Pipe()
 	done := make(chan struct{})
 	const sessionID = "33333333-3333-4333-8333-333333333333"
@@ -260,42 +244,8 @@ func TestAuthenticatedWebSocketSessionAcceptsBoundProtocolTenant(t *testing.T) {
 	}
 }
 
-func TestAuthenticatedSessionDeniesTargetOutsideRegisteredNetworkSpec(t *testing.T) {
-	server := NewServer(nil, time.Second)
-	const sessionID = "33333333-3333-4333-8333-333333333333"
-	spec, specHash := gatewayTestNetworkSpec(t)
-	authorization := SessionAuthorization{
-		SessionID: sessionID, Generation: 1, Namespace: "development", NetworkSpecHash: specHash,
-	}
-	token, err := tunnel.RelaySessionToken(sessionID, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	control, gatewayControl := net.Pipe()
-	go server.ServeConnForAuthorization(gatewayControl, authorization)
-	if err := tunnel.WriteAuthorizedControlSession(control, token, spec); err != nil {
-		t.Fatal(err)
-	}
-	if err := tunnel.ReadStatus(control); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = control.Close() }()
-
-	client, gatewayConnection := net.Pipe()
-	go server.ServeConnForAuthorization(gatewayConnection, authorization)
-	if err := tunnel.WriteOpen(client, tunnel.OpenRequest{
-		Command: tunnel.CommandTCP, Host: "192.168.1.1", Port: 443,
-	}, token); err != nil {
-		t.Fatal(err)
-	}
-	if err := tunnel.ReadStatus(client); err == nil || !strings.Contains(err.Error(), "not allowed") {
-		t.Fatalf("target status = %v", err)
-	}
-	_ = client.Close()
-}
-
 func TestAuthenticatedSessionDispatchesTrafficOnAuthorizedLogicalStream(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	handler := &gatewayTestTrafficHandler{calls: make(chan gatewayTestTrafficCall, 1)}
 	server.SetTrafficHandler(handler)
 	const sessionID = "33333333-3333-4333-8333-333333333333"
@@ -351,7 +301,7 @@ func TestAuthenticatedSessionDispatchesTrafficOnAuthorizedLogicalStream(t *testi
 }
 
 func TestAuthenticatedSessionRejectsTrafficWithoutActiveControlAuthorization(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	handler := &gatewayTestTrafficHandler{calls: make(chan gatewayTestTrafficCall, 1)}
 	server.SetTrafficHandler(handler)
 	const sessionID = "33333333-3333-4333-8333-333333333333"
@@ -383,7 +333,7 @@ func TestAuthenticatedSessionRejectsTrafficWithoutActiveControlAuthorization(t *
 }
 
 func TestAuthenticatedControlRejectsNetworkSpecHashMismatch(t *testing.T) {
-	server := NewServer(nil, time.Second)
+	server := NewServer(nil)
 	const sessionID = "33333333-3333-4333-8333-333333333333"
 	spec, _ := gatewayTestNetworkSpec(t)
 	token, err := tunnel.RelaySessionToken(sessionID, 1)
@@ -430,10 +380,4 @@ func waitForActiveConnections(t *testing.T, server *Server, expected int) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("active connections = %d, want %d", server.ActiveConnections(), expected)
-}
-
-func TestResolvePrivateRejectsPublicTarget(t *testing.T) {
-	if _, err := resolvePrivate(context.Background(), "8.8.8.8", 53); err == nil {
-		t.Fatal("expected public target to be rejected")
-	}
 }

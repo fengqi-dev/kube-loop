@@ -5,12 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	clienttraffic "github.com/fengqi-dev/kube-loop/internal/client/traffic"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trojanws"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 	"github.com/fengqi-dev/kube-loop/internal/transport/trafficstream"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
@@ -47,27 +50,32 @@ func startWithLifetime(
 		cancel()
 		return nil, err
 	}
-	bridge, err := config.listenSOCKS(runtimeCtx, transport.forwarder.Address(), config.ListenAddress, transport.token)
+	bridge, err := config.listenSOCKS(runtimeCtx, config.ListenAddress)
 	if err != nil && useDefaultListenAddress && utils.IsAddressAlreadyInUse(err) {
 		host, _, splitErr := net.SplitHostPort(config.ListenAddress)
 		if splitErr == nil {
-			bridge, err = config.listenSOCKS(
-				runtimeCtx, transport.forwarder.Address(), net.JoinHostPort(host, "0"), transport.token,
-			)
+			bridge, err = config.listenSOCKS(runtimeCtx, net.JoinHostPort(host, "0"))
 		}
 	}
 	if err != nil {
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		_ = closeForwardCore(transport.forward)
 		stopStartupCancel()
 		cancel()
 		return nil, fmt.Errorf("start Data Plane SOCKS bridge: %w", err)
+	}
+	if transport.forward != nil {
+		bridge.SetForwardDialer(clienttraffic.Dialer{Endpoint: clienttraffic.Endpoint{
+			Address: transport.forward.Address(),
+		}})
 	}
 	stopStartupCancel()
 	if err := startupCtx.Err(); err != nil {
 		_ = bridge.Close()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		_ = closeForwardCore(transport.forward)
 		cancel()
 		return nil, err
 	}
@@ -75,7 +83,7 @@ func startWithLifetime(
 		ctx: runtimeCtx, cancel: cancel, forwarder: transport.forwarder, control: transport.control,
 		token:  transport.token,
 		bridge: bridge, done: make(chan struct{}), transportDone: make(chan struct{}),
-		session: session, tunStarter: config.TUNStarter, config: config,
+		session: session, tunStarter: config.TUNStarter, forward: transport.forward, config: config,
 		dnsNamespace: strings.TrimSpace(serverProfile.DNSNamespace),
 		hostAliases:  profileHostAliases(serverProfile.HostAliases),
 		status: Status{
@@ -90,6 +98,7 @@ func startWithLifetime(
 	bridge.SetLogHandler(runtime.appendSOCKSLog)
 	runtime.appendSOCKSLog("listening on " + bridge.Addr().String())
 	runtime.startControlWatch(transport.control, runtime.transportDone)
+	runtime.startForwardWatch(transport.forward, runtime.transportDone)
 	go runtime.watchContext(runtimeCtx)
 	return runtime, nil
 }
@@ -166,10 +175,47 @@ func openTransport(
 		_ = forwarder.Close()
 		return openedTransport{}, fmt.Errorf("register Data Plane Session authorization: %w", err)
 	}
+	var forward ForwardCore
+	if config.ForwardStart != nil {
+		forwardTicket, ticketErr := ticketSource(ctx)
+		if ticketErr != nil {
+			_ = control.Close()
+			_ = forwarder.Close()
+			return openedTransport{}, fmt.Errorf("obtain forward RelayTicket assignment: %w", ticketErr)
+		}
+		if forwardTicket.Endpoint != ticket.Endpoint || forwardTicket.RelayID != ticket.RelayID ||
+			forwardTicket.DeviceID != ticket.DeviceID {
+			_ = control.Close()
+			_ = forwarder.Close()
+			return openedTransport{}, errors.New("relay assignment changed while starting forward transport")
+		}
+		forwardURL, urlErr := url.Parse(webSocketURL)
+		if urlErr != nil {
+			_ = control.Close()
+			_ = forwarder.Close()
+			return openedTransport{}, errors.New("forward WebSocket endpoint is invalid")
+		}
+		forwardURL.Path = trojanws.DefaultPath
+		forwardURL.RawPath = ""
+		forwardURL.RawQuery = ""
+		forwardURL.Fragment = ""
+		insecure := config.TLSConfig != nil && config.TLSConfig.InsecureSkipVerify
+		forward, err = config.ForwardStart(ctx, ForwardOptions{
+			SessionID: session.ID, Generation: session.Generation,
+			Endpoint: forwardURL.String(), RelayTicket: forwardTicket.Ticket,
+			TLSInsecure: insecure,
+		})
+		if err != nil {
+			_ = control.Close()
+			_ = forwarder.Close()
+			return openedTransport{}, fmt.Errorf("start Trojan WebSocket forward transport: %w", err)
+		}
+	}
 	return openedTransport{
 		forwarder: forwarder, control: control, token: token,
 		trafficEncryption: clientEncryption,
 		noisePublicKey:    noisePublicKey,
+		forward:           forward,
 	}, nil
 }
 
@@ -219,6 +265,29 @@ func (runtime *Runtime) startControlWatch(control net.Conn, transportDone chan s
 	})
 }
 
+func (runtime *Runtime) startForwardWatch(core ForwardCore, transportDone chan struct{}) {
+	if core == nil {
+		return
+	}
+	runtime.transportWG.Go(func() {
+		select {
+		case <-core.Done():
+			runtime.transportMu.Lock()
+			current := runtime.ctx.Err() == nil && runtime.transportDone == transportDone
+			runtime.transportMu.Unlock()
+			if !current {
+				return
+			}
+			err := core.Err()
+			if err == nil {
+				err = errors.New("forward sing-box exited")
+			}
+			runtime.interruptTransport(fmt.Errorf("forward sing-box stopped: %w", err))
+		case <-runtime.ctx.Done():
+		}
+	})
+}
+
 func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct{}) {
 	var buffer [1]byte
 	_, err := control.Read(buffer[:])
@@ -251,7 +320,7 @@ func (runtime *Runtime) watchControl(control net.Conn, transportDone chan struct
 	runtime.forwarder = nil
 	runtime.token = tunnel.SessionToken{}
 	runtime.transportErr = err
-	runtime.bridge.SetGatewayAddress("127.0.0.1:0")
+	runtime.bridge.SetForwardDialer(nil)
 	closeSignal(runtime.transportDone)
 	runtime.transportMu.Unlock()
 	_ = control.Close()
@@ -278,7 +347,7 @@ func (runtime *Runtime) interruptTransport(reason error) {
 	runtime.forwarder = nil
 	runtime.token = tunnel.SessionToken{}
 	runtime.transportErr = reason
-	runtime.bridge.SetGatewayAddress("127.0.0.1:0")
+	runtime.bridge.SetForwardDialer(nil)
 	closeSignal(runtime.transportDone)
 	runtime.transportMu.Unlock()
 	_ = closeConnection(control)

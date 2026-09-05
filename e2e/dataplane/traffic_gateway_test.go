@@ -292,7 +292,7 @@ func startE2ETrafficGateway(
 	if err != nil {
 		t.Fatal(err)
 	}
-	core := gateway.NewServer(nil, 10*time.Second)
+	core := gateway.NewServer(nil)
 	core.SetTrafficHandler(api)
 	tunnelHandler, err := websocketmux.NewHandler(websocketmux.ServerConfig{
 		Authenticator: websocketmux.AuthenticatorFunc(func(request *http.Request) (websocketmux.Identity, error) {

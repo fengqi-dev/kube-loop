@@ -8,7 +8,6 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func normalizedConfig(config Config) Config {
@@ -31,12 +30,8 @@ func normalizedConfig(config Config) Config {
 		}
 	}
 	if config.listenSOCKS == nil {
-		config.listenSOCKS = func(
-			ctx context.Context,
-			gatewayAddress, listenAddress string,
-			token tunnel.SessionToken,
-		) (localBridge, error) {
-			return socksbridge.Listen(ctx, gatewayAddress, listenAddress, token)
+		config.listenSOCKS = func(ctx context.Context, listenAddress string) (localBridge, error) {
+			return socksbridge.Listen(ctx, listenAddress)
 		}
 	}
 	if config.dialContext == nil {

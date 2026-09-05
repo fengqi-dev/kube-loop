@@ -74,6 +74,13 @@ func TestRequestVerifierConsumesRelayTicketOnce(t *testing.T) {
 	if accepted.Load() != 1 {
 		t.Fatalf("accepted = %d, want 1", accepted.Load())
 	}
+	for range 2 {
+		request := httptest.NewRequest(http.MethodGet, "/tunnel", nil)
+		request.Header.Set("Authorization", "Bearer "+ticket)
+		if _, verifyErr := requestVerifier.VerifyReusable(request); verifyErr != nil {
+			t.Fatalf("reconnectable transport ticket rejected: %v", verifyErr)
+		}
+	}
 }
 
 func TestRequestVerifierRejectsOlderSessionGeneration(t *testing.T) {

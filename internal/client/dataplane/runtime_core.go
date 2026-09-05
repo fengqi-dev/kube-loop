@@ -37,10 +37,29 @@ type Config struct {
 	RecoveryBackoff   time.Duration
 	OnStatus          func(StatusEvent)
 	Logger            *slog.Logger
+	ForwardStart      ForwardStartFunc
 	startForwarder    func(context.Context, websocketmux.ClientConfig) (streamForwarder, error)
-	listenSOCKS       func(context.Context, string, string, tunnel.SessionToken) (localBridge, error)
+	listenSOCKS       func(context.Context, string) (localBridge, error)
 	dialContext       func(context.Context, string, string) (net.Conn, error)
 }
+
+type ForwardOptions struct {
+	SessionID   string
+	Generation  uint64
+	Endpoint    string
+	RelayTicket string
+	TLSInsecure bool
+	LogLevel    string
+}
+
+type ForwardCore interface {
+	Address() string
+	Done() <-chan struct{}
+	Err() error
+	Close() error
+}
+
+type ForwardStartFunc func(context.Context, ForwardOptions) (ForwardCore, error)
 
 type streamForwarder interface {
 	Address() string
@@ -50,8 +69,7 @@ type streamForwarder interface {
 
 type localBridge interface {
 	Addr() net.Addr
-	SetGatewayAddress(string)
-	SetGateway(string, tunnel.SessionToken)
+	SetForwardDialer(socksbridge.ForwardDialer)
 	SetHostTCPHandler(socksbridge.HostTCPHandler)
 	SetLogHandler(socksbridge.LogHandler)
 	Close() error
@@ -63,6 +81,7 @@ type openedTransport struct {
 	token             tunnel.SessionToken
 	trafficEncryption bool
 	noisePublicKey    []byte
+	forward           ForwardCore
 }
 
 type transportStreams struct {
@@ -102,6 +121,7 @@ type Runtime struct {
 	tunCancel    context.CancelFunc
 	tunWG        sync.WaitGroup
 	tunStarter   TUNStarter
+	forward      ForwardCore
 	dnsNamespace string
 	hostAliases  []sessionspec.HostAlias
 	config       Config

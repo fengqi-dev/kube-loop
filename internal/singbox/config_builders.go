@@ -98,8 +98,8 @@ func buildDNSConfig(network NetworkSpec, options Options) (generatedDNS, error) 
 			"detour":        KubernetesOutbound,
 		})
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": clusterDomains,
-			configServerKey: "cluster",
+			configDomainSuffixKey: clusterDomains,
+			configServerKey:       "cluster",
 		})
 	}
 	dnsServers = append(dnsServers, map[string]any{
@@ -191,10 +191,10 @@ func buildInbounds(routes []string, options Options) ([]map[string]any, error) {
 	inbounds := []map[string]any{
 		tunInbound,
 		{
-			configTypeKey: DirectOutbound,
-			configTagKey:  "dns-in",
-			"listen":      options.DNSHost,
-			"listen_port": options.DNSPort,
+			configTypeKey:       DirectOutbound,
+			configTagKey:        "dns-in",
+			configListenKey:     options.DNSHost,
+			configListenPortKey: options.DNSPort,
 		},
 	}
 	if options.TrafficPorts.Listen == 0 {
@@ -207,13 +207,13 @@ func buildInbounds(routes []string, options Options) ([]map[string]any, error) {
 		return nil, err
 	}
 	inbounds = append(inbounds, map[string]any{
-		configTypeKey: "socks",
+		configTypeKey: configSOCKSType,
 		configTagKey:  TrafficInbound,
 		"listen":      DefaultDNSListen,
 		"listen_port": options.TrafficPorts.Listen,
 		"users": []map[string]any{{
-			"username": TrafficLocalUser,
-			"password": options.TrafficPassword,
+			"username":        TrafficLocalUser,
+			configPasswordKey: options.TrafficPassword,
 		}},
 	})
 	return inbounds, nil

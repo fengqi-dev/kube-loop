@@ -27,8 +27,7 @@ if ([string]::IsNullOrWhiteSpace($GatewayImage)) {
 }
 
 $mainPackages = @(
-    "./e2e/dataplane",
-    "./e2e/remotetun"
+    "./e2e/dataplane"
 )
 
 $mainExit = 1
@@ -176,13 +175,14 @@ to record the expected DNS failures.
         Invoke-Checked go run ./e2e/scripts/stop-helper.go
 
         Write-Host "==> Building Gateway image $GatewayImage" -ForegroundColor Cyan
+        $gatewayArch = (& go env GOARCH).Trim()
         $oldCGO = $env:CGO_ENABLED
         $oldGOOS = $env:GOOS
         $oldGOARCH = $env:GOARCH
         try {
             $env:CGO_ENABLED = "0"
             $env:GOOS = "linux"
-            $env:GOARCH = (& go env GOARCH).Trim()
+            $env:GOARCH = $gatewayArch
             Invoke-Checked -Command go -Arguments @(
                 "build",
                 "-trimpath",
@@ -197,6 +197,9 @@ to record the expected DNS failures.
             $env:GOOS = $oldGOOS
             $env:GOARCH = $oldGOARCH
         }
+        Invoke-Checked go run ./build/singbox-patched.go `
+            -target "linux/$gatewayArch" `
+            -output build/bin/sing-box-gateway
         Invoke-Checked docker build `
             -t $GatewayImage `
             -f build/gateway.e2e.Dockerfile .
@@ -213,7 +216,6 @@ to record the expected DNS failures.
     $env:KUBELOOP_E2E_CONTEXT = $Context
     $env:KUBELOOP_GATEWAY_IMAGE = $GatewayImage
     $env:KUBELOOP_SINGBOX_PATH = $singBox
-    $env:KUBELOOP_REMOTE_TUN_E2E = "1"
 
     Write-Host "==> Running TUN/Kubernetes E2E" -ForegroundColor Cyan
     & go test `

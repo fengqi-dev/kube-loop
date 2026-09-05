@@ -63,7 +63,7 @@ if [[ -n "${KUBELOOP_E2E_PACKAGES:-}" ]]; then
 else
   # Clients only know the Gateway address, so the acceptance gate exercises
   # the authenticated Data Plane and remote TUN paths.
-  E2E_PACKAGES=(./e2e/dataplane ./e2e/remotetun)
+  E2E_PACKAGES=(./e2e/dataplane)
 fi
 set +e
 go test -tags=e2e "${E2E_PACKAGES[@]}" -count=1 -timeout="${TIMEOUT}" -parallel=1 -p 1 -v "$@" 2>&1 | tee "${LOG}"

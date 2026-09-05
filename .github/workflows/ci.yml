@@ -348,6 +348,9 @@ jobs:
             -trimpath -ldflags="-s -w" \
             -o build/bin/kubeloop-gateway \
             ./cmd/kubeloop-gateway
+          go run ./build/singbox-patched.go \
+            -target "linux/$(go env GOARCH)" \
+            -output build/bin/sing-box-gateway
           docker build -t kubeloop-gateway:dev -f build/gateway.e2e.Dockerfile .
           minikube image load kubeloop-gateway:dev
 
@@ -516,12 +519,6 @@ jobs:
         run: |
           go test -tags=e2e ./e2e/platform ./internal/helper -count=1 -v
 
-      - name: Run Windows remote Gateway TUN and wake E2E
-        env:
-          KUBELOOP_REMOTE_TUN_E2E: "1"
-          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}\build\bin\sing-box.exe
-        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
-
       - name: Uninstall helper
         if: always()
         shell: pwsh
@@ -604,12 +601,6 @@ jobs:
             build/bin/helper-platform-e2e.test \
               -test.v \
               -test.run '^TestPlatformDNSApplyAndRestore$'
-
-      - name: Run macOS remote Gateway TUN and wake E2E
-        env:
-          KUBELOOP_REMOTE_TUN_E2E: "1"
-          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
-        run: go test -tags=e2e ./e2e/remotetun -count=1 -v -timeout=5m
 
       - name: Uninstall helper
         if: always()

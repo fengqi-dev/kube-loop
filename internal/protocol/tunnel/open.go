@@ -1,84 +1,20 @@
 package tunnel
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"net"
-	"strconv"
 
 	"github.com/google/uuid"
 
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
-type OpenRequest struct {
-	Command byte
-	Host    string
-	Port    uint16
-}
-
 // TrafficOpenRequest identifies one reverse traffic Task carried by this
 // logical stream. TaskID is always the canonical, lowercase UUID form.
 type TrafficOpenRequest struct {
 	Mode   string
 	TaskID string
-}
-
-func (r OpenRequest) Address() string {
-	return net.JoinHostPort(r.Host, strconv.Itoa(int(r.Port)))
-}
-
-func WriteOpen(w io.Writer, request OpenRequest, token SessionToken) error {
-	if request.Command != CommandTCP && request.Command != CommandUDP {
-		return fmt.Errorf("unsupported command %d", request.Command)
-	}
-	if request.Host == "" || len(request.Host) > maxHostSize {
-		return errors.New("target host length is invalid")
-	}
-	if request.Port == 0 {
-		return errors.New("target port is required")
-	}
-	value, err := appendSessionHeader(make([]byte, 0, 41+len(request.Host)), request.Command, token)
-	if err != nil {
-		return err
-	}
-	value = appendUint16String(value, request.Host)
-	value = binary.BigEndian.AppendUint16(value, request.Port)
-	return utils.WriteAll(w, value)
-}
-
-func ReadOpen(r io.Reader) (OpenRequest, error) {
-	header, err := ReadSessionHeader(r)
-	if err != nil {
-		return OpenRequest{}, err
-	}
-	return ReadOpenBody(r, header.Command)
-}
-
-// ReadOpenBody reads host/port after magic+command were already consumed.
-func ReadOpenBody(r io.Reader, command byte) (OpenRequest, error) {
-	if command != CommandTCP && command != CommandUDP {
-		return OpenRequest{}, fmt.Errorf("unsupported command %d", command)
-	}
-	var sizeBuf [2]byte
-	if _, err := io.ReadFull(r, sizeBuf[:]); err != nil {
-		return OpenRequest{}, err
-	}
-	hostSize := int(binary.BigEndian.Uint16(sizeBuf[:]))
-	if hostSize == 0 || hostSize > maxHostSize {
-		return OpenRequest{}, errors.New("target host length is invalid")
-	}
-	target := make([]byte, hostSize+2)
-	if _, err := io.ReadFull(r, target); err != nil {
-		return OpenRequest{}, err
-	}
-	port := binary.BigEndian.Uint16(target[hostSize:])
-	if port == 0 {
-		return OpenRequest{}, errors.New("target port is required")
-	}
-	return OpenRequest{Command: command, Host: string(target[:hostSize]), Port: port}, nil
 }
 
 // WriteTrafficOpen opens an Exchange, Mirror, or Preview Task on an existing
@@ -127,12 +63,6 @@ func ReadTrafficOpenBody(r io.Reader) (TrafficOpenRequest, error) {
 		return TrafficOpenRequest{}, err
 	}
 	return TrafficOpenRequest{Mode: mode, TaskID: taskID}, nil
-}
-
-func appendUint16String(value []byte, text string) []byte {
-	// Callers validate protocol strings against their uint16 wire limit.
-	value = binary.BigEndian.AppendUint16(value, uint16(len(text))) //nolint:gosec // Wire strings are bounded.
-	return append(value, text...)
 }
 
 func encodeTrafficMode(mode string) (byte, error) {

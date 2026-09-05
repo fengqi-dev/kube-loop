@@ -18,20 +18,32 @@ const (
 	defaultTUNAddress  = "198.19.0.1/30"
 	defaultNamespace   = "default"
 
-	configActionKey   = "action"
-	configAuthUserKey = "auth_user"
-	configIPCIDRKey   = "ip_cidr"
-	configInboundKey  = "inbound"
-	configModeKey     = "mode"
-	configOutboundKey = "outbound"
-	configRulesKey    = "rules"
-	configServerKey   = "server"
-	configTagKey      = "tag"
-	configTypeKey     = "type"
-	logicalRuleModeOr = "or"
-	logicalRuleType   = "logical"
-	hostsDNSServer    = "hosts"
-	rejectRouteAction = "reject"
+	configActionKey       = "action"
+	configAuthUserKey     = "auth_user"
+	configDomainSuffixKey = "domain_suffix"
+	configEnabledKey      = "enabled"
+	configFinalKey        = "final"
+	configIPCIDRKey       = "ip_cidr"
+	configInboundKey      = "inbound"
+	configInboundsKey     = "inbounds"
+	configLevelKey        = "level"
+	configListenKey       = "listen"
+	configListenPortKey   = "listen_port"
+	configLogKey          = "log"
+	configModeKey         = "mode"
+	configOutboundKey     = "outbound"
+	configOutboundsKey    = "outbounds"
+	configPasswordKey     = "password"
+	configRouteKey        = "route"
+	configRulesKey        = "rules"
+	configServerKey       = "server"
+	configTagKey          = "tag"
+	configTypeKey         = "type"
+	configSOCKSType       = "socks"
+	logicalRuleModeOr     = "or"
+	logicalRuleType       = "logical"
+	hostsDNSServer        = "hosts"
+	rejectRouteAction     = "reject"
 
 	// TrafficInbound is the single loopback SOCKS inbound for local feature
 	// adapters. All local features share one auth_user (TrafficLocalUser);
@@ -91,17 +103,17 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	routeRules := buildRouteRules(routes, dnsConfig.clusterDomains)
 
 	config := map[string]any{
-		"log": map[string]any{"level": normalizeLogLevel(options.LogLevel), "output": "sing-box.log"},
+		configLogKey: map[string]any{configLevelKey: normalizeLogLevel(options.LogLevel), "output": "sing-box.log"},
 		"dns": map[string]any{
-			"servers":  dnsConfig.servers,
-			"rules":    dnsConfig.rules,
-			"final":    LocalOutbound,
-			"strategy": "prefer_ipv4",
+			"servers":      dnsConfig.servers,
+			configRulesKey: dnsConfig.rules,
+			configFinalKey: LocalOutbound,
+			"strategy":     "prefer_ipv4",
 		},
-		"inbounds": inbounds,
-		"outbounds": []map[string]any{
+		configInboundsKey: inbounds,
+		configOutboundsKey: []map[string]any{
 			{
-				configTypeKey:   "socks",
+				configTypeKey:   configSOCKSType,
 				configTagKey:    KubernetesOutbound,
 				configServerKey: options.BridgeHost,
 				"server_port":   options.BridgePort,
@@ -110,7 +122,7 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 			{configTypeKey: DirectOutbound, configTagKey: LocalOutbound},
 			{configTypeKey: DirectOutbound, configTagKey: DirectOutbound},
 		},
-		"route": map[string]any{
+		configRouteKey: map[string]any{
 			"rules":                   routeRules,
 			"final":                   DirectOutbound,
 			"auto_detect_interface":   true,

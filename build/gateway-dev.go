@@ -17,6 +17,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/fengqi-dev/kube-loop/internal/componentstore"
 )
 
 const (
@@ -35,6 +37,9 @@ func main() {
 	}
 	if err := buildDevelopmentSingBox(root); err != nil {
 		fatalf("build local sing-box: %v", err)
+	}
+	if err := buildGatewaySingBox(root); err != nil {
+		fatalf("build Gateway sing-box: %v", err)
 	}
 	controlPlaneHash, err := controlPlaneSourceHash(root)
 	if err != nil {
@@ -127,8 +132,27 @@ func main() {
 func buildDevelopmentSingBox(root string) error {
 	target := runtime.GOOS + "/" + runtime.GOARCH
 	fmt.Printf("==> Building local sing-box for %s\n", target)
-	return run(root, exec.Command(
+	if err := run(root, exec.Command(
 		"go", "run", "./build/stage-package-assets.go", target,
+	)); err != nil {
+		return err
+	}
+	name := "sing-box"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if _, err := componentstore.Cache("dev", name, filepath.Join(root, "build", "bin", name)); err != nil {
+		return fmt.Errorf("refresh development sing-box cache: %w", err)
+	}
+	return nil
+}
+
+func buildGatewaySingBox(root string) error {
+	target := "linux/" + runtime.GOARCH
+	output := filepath.Join(root, "build", "bin", "sing-box-gateway")
+	fmt.Printf("==> Building Gateway sing-box for %s\n", target)
+	return run(root, exec.Command(
+		"go", "run", "./build/singbox-patched.go", "-target", target, "-output", output,
 	))
 }
 
@@ -144,7 +168,14 @@ func controlPlaneSourceHash(root string) (string, error) {
 }
 
 func gatewaySourceHash(root string) (string, error) {
-	return sourceHash(root, []string{"go.mod", "go.sum", ".dockerignore", "build/gateway.e2e.Dockerfile"}, []string{
+	return sourceHash(root, []string{
+		"go.mod", "go.sum", ".dockerignore", "build/gateway.e2e.Dockerfile",
+		"internal/singbox/distribution/version.go",
+		"third_party/patches/sing-box/0001-kubeloop-minimal-features.patch",
+		"third_party/patches/sing-box/0002-kubeloop-minimal-registry.patch",
+		"third_party/patches/sing-box/0003-kubeloop-minimal-overlay.patch",
+		"third_party/patches/sing-box/0004-kubeloop-runtime-cli.patch",
+	}, []string{
 		"cmd/kubeloop-gateway",
 		"internal",
 	})

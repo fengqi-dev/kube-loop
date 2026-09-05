@@ -46,6 +46,7 @@ func (runtime *Runtime) Close() error {
 		runtime.transportMu.Lock()
 		control := runtime.control
 		forwarder := runtime.forwarder
+		forward := runtime.forward
 		draining := make([]*transportStreams, 0, len(runtime.streams))
 		for _, streams := range runtime.streams {
 			if streams.draining {
@@ -54,6 +55,7 @@ func (runtime *Runtime) Close() error {
 		}
 		runtime.control = nil
 		runtime.forwarder = nil
+		runtime.forward = nil
 		runtime.token = tunnel.SessionToken{}
 		runtime.streams = nil
 		closeSignal(runtime.transportDone)
@@ -63,6 +65,7 @@ func (runtime *Runtime) Close() error {
 			ignoreClosed(runtime.bridge.Close()),
 			closeConnection(control),
 			closeForwarder(forwarder),
+			closeForwardCore(forward),
 		)
 		for _, streams := range draining {
 			runtime.closeErr = errors.Join(
@@ -75,6 +78,13 @@ func (runtime *Runtime) Close() error {
 		close(runtime.done)
 	})
 	return runtime.closeErr
+}
+
+func closeForwardCore(core ForwardCore) error {
+	if core == nil {
+		return nil
+	}
+	return core.Close()
 }
 
 func (runtime *Runtime) watchContext(ctx context.Context) {

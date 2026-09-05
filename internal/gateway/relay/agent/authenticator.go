@@ -129,6 +129,21 @@ func (authenticator *TicketAuthenticator) Verify(request *http.Request) (relayti
 	return requestVerifier.Verify(request)
 }
 
+// VerifyReusable validates a ticket for the reconnectable v3 forward
+// WebSocket. It retains signature, expiry, revocation and generation checks.
+func (authenticator *TicketAuthenticator) VerifyReusable(request *http.Request) (relayticket.Claims, error) {
+	if authenticator == nil {
+		return relayticket.Claims{}, relayticket.ErrInvalid
+	}
+	authenticator.mu.RLock()
+	requestVerifier := authenticator.requestVerifier
+	authenticator.mu.RUnlock()
+	if requestVerifier == nil {
+		return relayticket.Claims{}, relayticket.ErrInvalid
+	}
+	return requestVerifier.VerifyReusable(request)
+}
+
 func (authenticator *TicketAuthenticator) AppliedGenerations() (uint64, uint64) {
 	if authenticator == nil {
 		return 0, 0

@@ -1,22 +1,16 @@
 package gateway
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/netip"
 	"slices"
-	"strconv"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
-	"github.com/fengqi-dev/kube-loop/internal/transport/streamcopy"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
@@ -42,8 +36,6 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	}
 
 	switch header.Command {
-	case tunnel.CommandTCP, tunnel.CommandUDP:
-		s.handleOutbound(ctx, client, header, &required)
 	case tunnel.CommandControl:
 		spec, readErr := tunnel.ReadAuthorizedControlSpec(client)
 		if readErr != nil {
@@ -73,7 +65,7 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 			_ = client.Close()
 			return
 		}
-		s.handleControl(client, header.Token, spec, hash, required.namespace)
+		s.handleControl(ctx, client, required, header.Token, spec, hash, required.namespace)
 	case tunnel.CommandTraffic:
 		request, readErr := tunnel.ReadTrafficOpenBody(client)
 		if readErr != nil {
@@ -85,11 +77,8 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 			_ = client.Close()
 			return
 		}
-		_, authorized, authorizationErr := s.authorizedNetwork(header.Token, &required)
-		if authorizationErr != nil || !authorized {
-			if authorizationErr == nil {
-				authorizationErr = errors.New("gateway NetworkSpec authorization is not active")
-			}
+		authorizationErr := s.authorizedNetwork(header.Token, &required)
+		if authorizationErr != nil {
 			s.log(ctx,
 				required.requestID,
 				"Gateway traffic stream rejected",
@@ -156,85 +145,23 @@ func (s *Server) handle(ctx context.Context, client net.Conn, required requiredA
 	}
 }
 
-func (s *Server) handleOutbound(
-	ctx context.Context,
-	client net.Conn,
-	header tunnel.SessionHeader,
-	required *requiredAuthorization,
-) {
-	defer func() { _ = client.Close() }()
-	spec, authorized, authorizationErr := s.authorizedNetwork(header.Token, required)
-	if authorizationErr != nil {
-		_ = tunnel.WriteStatus(client, authorizationErr)
-		s.log(
-			ctx, required.requestID, "Gateway tunnel open rejected",
-			"reason", "authorization", "error", authorizationErr,
-		)
-		return
-	}
-	request, err := tunnel.ReadOpenBody(client, header.Command)
-	if err != nil {
-		s.log(ctx, required.requestID, "Gateway tunnel open rejected", "remote", client.RemoteAddr(), "error", err)
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, s.DialTimeout)
-	defer cancel()
-	var targetAddress string
-	if authorized {
-		targetAddress, err = s.resolveAuthorized(ctx, request.Host, request.Port, spec)
-	} else {
-		targetAddress, err = resolvePrivate(ctx, request.Host, request.Port)
-	}
-	if err != nil {
-		_ = tunnel.WriteStatus(client, err)
-		s.log(ctx, required.requestID, "Gateway target denied", "target", request.Address(), "error", err)
-		return
-	}
-	network := "tcp"
-	if request.Command == tunnel.CommandUDP {
-		network = "udp"
-	}
-	dialer := s.Dialer
-	if dialer == nil {
-		dialer = &net.Dialer{}
-	}
-	target, err := dialer.DialContext(ctx, network, targetAddress)
-	if err != nil {
-		_ = tunnel.WriteStatus(client, fmt.Errorf("dial target: %w", err))
-		s.log(
-			ctx, required.requestID, "Gateway target connection failed",
-			"network", network, "target", targetAddress, "error", err,
-		)
-		return
-	}
-	defer func() { _ = target.Close() }()
-	if err := tunnel.WriteStatus(client, nil); err != nil {
-		return
-	}
-	if request.Command == tunnel.CommandUDP {
-		s.relayUDP(client, target)
-		return
-	}
-	streamcopy.Bidirectional(client, target)
-}
-
 func (s *Server) authorizedNetwork(
 	token tunnel.SessionToken,
 	required *requiredAuthorization,
-) (networkspec.Spec, bool, error) {
+) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.tenants[token] <= 0 {
-		return networkspec.Spec{}, false, errors.New("gateway session is not active")
+		return errors.New("gateway session is not active")
 	}
 	if required == nil {
-		return networkspec.Spec{}, false, nil
+		return errors.New("gateway NetworkSpec authorization is not active")
 	}
 	network, ok := s.networks[token]
 	if !ok || network.hash != required.networkSpecHash || network.namespace != required.namespace {
-		return networkspec.Spec{}, false, errors.New("gateway NetworkSpec authorization is not active")
+		return errors.New("gateway NetworkSpec authorization is not active")
 	}
-	return network.spec, true, nil
+	return nil
 }
 
 func validNetworkSpecHash(value string) bool {
@@ -247,67 +174,6 @@ func validNetworkSpecHash(value string) bool {
 		}
 	}
 	return true
-}
-
-func (s *Server) relayUDP(client, target net.Conn) {
-	var once sync.Once
-	stop := func() { once.Do(func() { _ = target.Close(); _ = client.Close() }) }
-	readerDone := make(chan struct{})
-	go func() {
-		defer close(readerDone)
-		defer stop()
-		reader := bufio.NewReader(client)
-		var buffer []byte
-		for {
-			payload, err := tunnel.ReadDatagram(reader, buffer)
-			if err != nil {
-				return
-			}
-			buffer = payload[:0]
-			if _, err := target.Write(payload); err != nil {
-				return
-			}
-		}
-	}()
-	buffer := make([]byte, tunnel.MaxDatagramSize)
-	for {
-		read, err := target.Read(buffer)
-		if err != nil {
-			stop()
-			<-readerDone
-			return
-		}
-		if err := tunnel.WriteDatagram(client, buffer[:read]); err != nil {
-			stop()
-			<-readerDone
-			return
-		}
-	}
-}
-
-func resolvePrivate(ctx context.Context, host string, port uint16) (string, error) {
-	if strings.EqualFold(host, "localhost") {
-		return "", errors.New("loopback targets are not allowed")
-	}
-	addresses, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
-	if err != nil {
-		return "", fmt.Errorf("resolve target: %w", err)
-	}
-	for _, address := range addresses {
-		ip, ok := netip.AddrFromSlice(address.AsSlice())
-		if !ok {
-			continue
-		}
-		ip = ip.Unmap()
-		if isClusterAddress(ip) {
-			return net.JoinHostPort(ip.String(), strconv.FormatUint(uint64(port), 10)), nil
-		}
-	}
-	return "", fmt.Errorf("target %q does not resolve to a private cluster address", host)
-}
-
-func isClusterAddress(ip netip.Addr) bool {
-	return ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }
 
 func (s *Server) log(ctx context.Context, requestID, message string, attributes ...any) {

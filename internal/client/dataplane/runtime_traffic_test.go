@@ -170,7 +170,7 @@ func TestReconnectDrainsTransportUntilTrafficStreamCloses(t *testing.T) {
 				go acceptTestControlWithSignal(listener, controls)
 				return forwarder, nil
 			},
-			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			listenSOCKS: func(context.Context, string) (localBridge, error) {
 				return &testBridge{address: testAddress("127.0.0.1:45020")}, nil
 			},
 		},

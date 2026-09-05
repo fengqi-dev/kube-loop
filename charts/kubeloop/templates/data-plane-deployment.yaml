@@ -85,6 +85,8 @@ spec:
           resources:
             {{- toYaml .Values.dataPlane.resources | nindent 12 }}
           volumeMounts:
+            - name: gateway-runtime
+              mountPath: /tmp
             - name: gateway-config
               mountPath: /etc/kubeloop/gateway
               readOnly: true
@@ -95,6 +97,8 @@ spec:
               mountPath: /var/run/secrets/kubeloop/relay-identity
               readOnly: true
       volumes:
+        - name: gateway-runtime
+          emptyDir: {}
         - name: gateway-config
           configMap:
             name: {{ include "kubeloop.configName" . }}

@@ -116,6 +116,7 @@ data:
     gateway:
     {{- dict
       "http" (dict "listen" ":8080" "path" .Values.dataPlane.tunnelPath)
+      "forward" (dict "enabled" true "path" .Values.dataPlane.tunnelPath "singBoxPath" "/sing-box")
       "relay" $gatewayRelay
       "websocket" (dict
         "maxSessions" (int .Values.dataPlane.relayRegistry.maxWebSocketSessions)

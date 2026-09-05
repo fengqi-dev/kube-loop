@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"crypto/tls"
 	"errors"
 	"path/filepath"
@@ -11,8 +12,10 @@ import (
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
 	clientfiletransfer "github.com/fengqi-dev/kube-loop/internal/client/filetransfer"
+	clientforward "github.com/fengqi-dev/kube-loop/internal/client/forwardruntime"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
 
@@ -85,6 +88,20 @@ func configureRemoteRuntime(
 	dataPlanes, dataPlaneErr := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
 		ClientVersion: version, TLSConfig: developmentTLSConfig,
 		TUNStarter: NewSingboxRuntime(application.logger, application.currentLogLevel()),
+		ForwardStart: func(
+			ctx context.Context,
+			options clientdataplane.ForwardOptions,
+		) (clientdataplane.ForwardCore, error) {
+			binary, err := helper.LocateBundledSingBox()
+			if err != nil {
+				return nil, err
+			}
+			return (clientforward.Starter{BinaryPath: binary}).Start(ctx, clientforward.Options{
+				SessionID: options.SessionID, Generation: options.Generation,
+				Endpoint: options.Endpoint, RelayTicket: options.RelayTicket,
+				TLSInsecure: options.TLSInsecure, LogLevel: application.currentLogLevel(),
+			})
+		},
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			if application.ctx != nil {
 				runtime.EventsEmit(application.ctx, "dataplane:status", event)

@@ -5,9 +5,6 @@ import (
 	"errors"
 	"net"
 	"sync"
-	"time"
-
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 // HostTCPHandler claims intercepted Service destinations on the host TUN path.
@@ -15,24 +12,25 @@ import (
 type HostTCPHandler func(host string, port uint16) (serve func(net.Conn), ok bool)
 
 // HostUDPHandler claims intercepted UDP destinations on the host TUN path.
-// dial opens a connection that exchanges raw datagram payloads via Read/Write
-// (not tunnel length-prefix framing).
+// dial opens a connection that exchanges raw datagram payloads via Read/Write.
 type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (net.Conn, error), ok bool)
 
 type LogHandler func(message string)
 
-type Server struct {
-	GatewayAddress string
-	SessionToken   tunnel.SessionToken
-	DialTimeout    time.Duration
-	HostTCP        HostTCPHandler
-	HostUDP        HostUDPHandler
-	LogHandler     LogHandler
+type ForwardDialer interface {
+	DialContext(context.Context, string, string) (net.Conn, error)
+}
 
-	gatewayMu sync.RWMutex
-	hostMu    sync.RWMutex
-	logMu     sync.RWMutex
-	tasks     *goroutinePool
+type Server struct {
+	HostTCP       HostTCPHandler
+	HostUDP       HostUDPHandler
+	LogHandler    LogHandler
+	ForwardDialer ForwardDialer
+
+	dialerMu sync.RWMutex
+	hostMu   sync.RWMutex
+	logMu    sync.RWMutex
+	tasks    *goroutinePool
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
@@ -85,20 +83,10 @@ func (b *Bridge) SetLogHandler(handler LogHandler) {
 	b.server.logMu.Unlock()
 }
 
-// SetGatewayAddress switches new SOCKS requests to a replacement Kubernetes
-// API port-forward without interrupting the local sing-box listener.
-func (b *Bridge) SetGatewayAddress(address string) {
-	b.server.gatewayMu.Lock()
-	b.server.GatewayAddress = address
-	b.server.gatewayMu.Unlock()
-}
-
-// SetGateway atomically switches the endpoint and its generation-bound
-// protocol tenant token. Existing streams keep their established connection;
-// new streams use the replacement generation.
-func (b *Bridge) SetGateway(address string, token tunnel.SessionToken) {
-	b.server.gatewayMu.Lock()
-	b.server.GatewayAddress = address
-	b.server.SessionToken = token
-	b.server.gatewayMu.Unlock()
+// SetForwardDialer switches ordinary cluster traffic to a standard SOCKS
+// upstream backed by the v3 Trojan/WebSocket sing-box process.
+func (b *Bridge) SetForwardDialer(dialer ForwardDialer) {
+	b.server.dialerMu.Lock()
+	b.server.ForwardDialer = dialer
+	b.server.dialerMu.Unlock()
 }

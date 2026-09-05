@@ -128,7 +128,7 @@ func TestSlowTUNStartDoesNotBlockAnotherProfileStatus(t *testing.T) {
 			go acceptTestControl(listener)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			port := 49000 + starts.Add(1)
 			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(int(port)))}, nil
 		},

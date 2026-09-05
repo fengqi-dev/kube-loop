@@ -150,7 +150,7 @@ func (forwarder *Forwarder) dial() (result *pooledSession, resultErr error) {
 	encryptionEnabled := forwarder.config.TrafficEncryption == nil || *forwarder.config.TrafficEncryption
 	if serverHello == nil || !slices.Contains(hello.ProtocolVersions, serverHello.ProtocolVersion) ||
 		!slices.Contains(serverHello.Capabilities, "smux.v2") ||
-		!slices.Contains(serverHello.Capabilities, "tunnel.open.v2") ||
+		!slices.Contains(serverHello.Capabilities, wss.CapabilityTunnelControl) ||
 		!slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficWebSocket) ||
 		slices.Contains(serverHello.Capabilities, wss.CapabilityTrafficEncryption) != encryptionEnabled {
 		_ = websocketio.Close(connection, websocket.ClosePolicyViolation, "INVALID_HANDSHAKE")

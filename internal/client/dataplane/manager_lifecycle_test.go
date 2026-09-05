@@ -15,7 +15,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func TestManagerReusesSessionAndReplacesChangedSession(t *testing.T) {
@@ -71,7 +70,7 @@ func newManagerLifecycleFixture(t *testing.T) *managerLifecycleFixture {
 			go acceptTestControl(listener)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(43000+fixture.starts))}, nil
 		},
 	}
@@ -208,7 +207,7 @@ func TestManagerDisconnectClosesRuntimeAndRemovesProfile(t *testing.T) {
 			go acceptTestControl(listener)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return bridge, nil
 		},
 	})
@@ -282,7 +281,7 @@ func TestManagerRuntimeOutlivesConnectContext(t *testing.T) {
 			go acceptTestControl(listener)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{address: testAddress("127.0.0.1:49010")}, nil
 		},
 	})

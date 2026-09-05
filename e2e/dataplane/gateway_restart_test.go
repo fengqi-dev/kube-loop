@@ -1122,6 +1122,7 @@ func installGatewayWithLimits(
 				ObjectMeta: metav1.ObjectMeta{Labels: labels},
 				Spec: corev1.PodSpec{
 					HostNetwork: hostNetwork, DNSPolicy: dnsPolicy,
+					SecurityContext:              &corev1.PodSecurityContext{FSGroup: ptr.To[int64](65532)},
 					AutomountServiceAccountToken: ptr.To(false), TerminationGracePeriodSeconds: ptr.To[int64](8),
 					Containers: []corev1.Container{
 						{
@@ -1142,13 +1143,18 @@ func installGatewayWithLimits(
 								PeriodSeconds:    1,
 								FailureThreshold: 30,
 							},
+							SecurityContext: &corev1.SecurityContext{
+								ReadOnlyRootFilesystem: ptr.To(true),
+							},
 							VolumeMounts: []corev1.VolumeMount{
+								{Name: "runtime", MountPath: "/tmp"},
 								{Name: "config", MountPath: "/etc/kubeloop/gateway", ReadOnly: true},
 								{Name: "relay", MountPath: "/var/run/kubeloop/relay", ReadOnly: true},
 							},
 						},
 					},
 					Volumes: []corev1.Volume{
+						{Name: "runtime", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 						{Name: "config", VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
 							LocalObjectReference: corev1.LocalObjectReference{Name: name},
 						}}},

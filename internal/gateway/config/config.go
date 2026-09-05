@@ -12,6 +12,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/auth/relaybearer"
 	"github.com/fengqi-dev/kube-loop/internal/gateway/websocketmux"
+	"github.com/fengqi-dev/kube-loop/internal/protocol/trojanws"
 )
 
 const (
@@ -23,9 +24,16 @@ type Config struct {
 	HTTP             HTTPConfig      `json:"http"`
 	Relay            RelayConfig     `json:"relay"`
 	WebSocket        WebSocketConfig `json:"websocket"`
+	Forward          ForwardConfig   `json:"forward"`
 	MinClientVersion string          `json:"minClientVersion,omitempty"`
 	DrainTimeout     Duration        `json:"drainTimeout"`
 	LogLevel         string          `json:"logLevel"`
+}
+
+type ForwardConfig struct {
+	Enabled     bool   `json:"enabled"`
+	Path        string `json:"path"`
+	SingBoxPath string `json:"singBoxPath"`
 }
 
 type HTTPConfig struct {
@@ -87,6 +95,7 @@ func defaultConfig() Config {
 			StreamIdleTimeout: Duration{Duration: 30 * time.Minute},
 			TrafficEncryption: new(true),
 		},
+		Forward:      ForwardConfig{Enabled: true, Path: trojanws.DefaultPath, SingBoxPath: "/sing-box"},
 		DrainTimeout: Duration{Duration: 30 * time.Second},
 		LogLevel:     "info",
 	}
@@ -128,6 +137,8 @@ func LoadConfig(path string) (Config, error) {
 func (config *Config) normalizeAndValidate() error {
 	config.HTTP.Listen = strings.TrimSpace(config.HTTP.Listen)
 	config.HTTP.Path = strings.TrimSpace(config.HTTP.Path)
+	config.Forward.Path = strings.TrimSpace(config.Forward.Path)
+	config.Forward.SingBoxPath = strings.TrimSpace(config.Forward.SingBoxPath)
 	config.Relay.ControlPlaneURL = strings.TrimSpace(config.Relay.ControlPlaneURL)
 	config.Relay.Endpoint = strings.TrimSpace(config.Relay.Endpoint)
 	config.Relay.ClientCertificateFile = strings.TrimSpace(config.Relay.ClientCertificateFile)
@@ -140,6 +151,11 @@ func (config *Config) normalizeAndValidate() error {
 
 	if config.HTTP.Listen == "" || !strings.HasPrefix(config.HTTP.Path, "/") {
 		return errors.New("gateway HTTP listen address and absolute path are required")
+	}
+	if config.Forward.Enabled &&
+		(config.Forward.Path == "" || !strings.HasPrefix(config.Forward.Path, "/") ||
+			config.Forward.SingBoxPath == "") {
+		return errors.New("gateway forward configuration is invalid")
 	}
 	if config.Relay.ControlPlaneURL == "" || config.Relay.Endpoint == "" || config.Relay.ReplayEntries < 1 {
 		return errors.New("gateway Relay configuration is invalid")

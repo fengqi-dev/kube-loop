@@ -1,7 +1,6 @@
 package tunnel
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -47,41 +46,6 @@ func TestRelaySessionTokenIsStableAndDomainSeparated(t *testing.T) {
 	}
 	if _, err := RelaySessionToken("33333333-3333-4333-8333-333333333333", 0); err == nil {
 		t.Fatal("zero Session generation was accepted")
-	}
-}
-
-func TestOpenRequestAddress(t *testing.T) {
-	tests := []struct {
-		name    string
-		request OpenRequest
-		want    string
-	}{
-		{name: "hostname", request: OpenRequest{Host: "api.default", Port: 8080}, want: "api.default:8080"},
-		{name: "IPv4", request: OpenRequest{Host: "10.0.0.1", Port: 53}, want: "10.0.0.1:53"},
-		{name: "IPv6", request: OpenRequest{Host: "2001:db8::1", Port: 443}, want: "[2001:db8::1]:443"},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := test.request.Address(); got != test.want {
-				t.Fatalf("Address() = %q, want %q", got, test.want)
-			}
-		})
-	}
-}
-
-func TestOpenRoundTrip(t *testing.T) {
-	var stream bytes.Buffer
-	want := OpenRequest{Command: CommandTCP, Host: "api.default.svc.cluster.local", Port: 8080}
-	if err := WriteOpen(&stream, want, protocolTestToken); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadOpen(&stream)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != want {
-		t.Fatalf("got %#v, want %#v", got, want)
 	}
 }
 
@@ -155,7 +119,7 @@ func TestTrafficOpenRejectsInvalidModeTaskIDAndBody(t *testing.T) {
 	if _, err := ReadTrafficOpenBody(bytes.NewReader(invalidTaskID)); err == nil {
 		t.Fatal("malformed traffic Task ID was accepted")
 	}
-	wrongCommand := append(sessionHeaderBytes(CommandTCP), trafficModeExchange)
+	wrongCommand := append(sessionHeaderBytes(CommandControl), trafficModeExchange)
 	wrongCommand = append(wrongCommand, validTaskID...)
 	if _, err := ReadTrafficOpen(bytes.NewReader(wrongCommand)); err == nil {
 		t.Fatal("non-traffic command was accepted")
@@ -169,21 +133,6 @@ func TestStatusRoundTrip(t *testing.T) {
 	}
 	if err := ReadStatus(&stream); err == nil || err.Error() != "target denied" {
 		t.Fatalf("unexpected status error: %v", err)
-	}
-}
-
-func TestDatagramRoundTrip(t *testing.T) {
-	var stream bytes.Buffer
-	want := []byte("dns query")
-	if err := WriteDatagram(&stream, want); err != nil {
-		t.Fatal(err)
-	}
-	got, err := ReadDatagram(bufio.NewReader(&stream), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -231,20 +180,6 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 		want  []byte
 	}{
 		{
-			name: "open",
-			write: func(w io.Writer) error {
-				return WriteOpen(
-					w,
-					OpenRequest{Command: CommandTCP, Host: "api", Port: 8080},
-					protocolTestToken,
-				)
-			},
-			want: append(
-				sessionHeaderBytes(CommandTCP),
-				0, 3, 'a', 'p', 'i', 0x1f, 0x90,
-			),
-		},
-		{
 			name: "traffic-open",
 			write: func(w io.Writer) error {
 				return WriteTrafficOpen(w, TrafficOpenRequest{
@@ -270,13 +205,6 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 			},
 			want: []byte{StatusError, 0, 3, 'b', 'a', 'd'},
 		},
-		{
-			name: "datagram",
-			write: func(w io.Writer) error {
-				return WriteDatagram(w, []byte("dns"))
-			},
-			want: []byte{0, 3, 'd', 'n', 's'},
-		},
 	}
 
 	for _, test := range tests {
@@ -289,19 +217,6 @@ func TestProtocolGoldenEncoding(t *testing.T) {
 				t.Fatalf("wire bytes = % x, want % x", stream.Bytes(), test.want)
 			}
 		})
-	}
-}
-
-func TestProtocolGoldenDecoding(t *testing.T) {
-	open, err := ReadOpen(bytes.NewReader(append(
-		sessionHeaderBytes(CommandUDP),
-		0, 3, 'd', 'n', 's', 0, 53,
-	)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if open != (OpenRequest{Command: CommandUDP, Host: "dns", Port: 53}) {
-		t.Fatalf("decoded open = %#v", open)
 	}
 }
 

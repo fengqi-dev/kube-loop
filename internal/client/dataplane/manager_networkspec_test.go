@@ -14,7 +14,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func TestManagerReconfiguresTUNWhenHeartbeatRefreshesNetworkSpec(t *testing.T) {
@@ -99,7 +98,7 @@ func newNetworkSpecRefreshFixture(t *testing.T) *networkSpecRefreshFixture {
 			go acceptTestControlWithSignal(listener, fixture.controls)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{
 				address: testAddress("127.0.0.1:" + strconv.Itoa(47000+int(fixture.starts.Load()))),
 			}, nil
@@ -266,7 +265,7 @@ func TestManagerRejectsStaleRecoveryGeneration(t *testing.T) {
 			go acceptTestControlWithSignal(listener, controls)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{address: testAddress("127.0.0.1:45001")}, nil
 		},
 	})
@@ -308,9 +307,9 @@ func TestManagerRejectsStaleRecoveryGeneration(t *testing.T) {
 			manager.mu.Lock()
 			bridge := manager.active[serverProfile.ID].runtime.bridge.(*testBridge)
 			manager.mu.Unlock()
-			gatewayAddress, closed := bridge.snapshot()
-			if gatewayAddress != "127.0.0.1:0" || !closed {
-				t.Fatalf("exhausted recovery bridge state = gateway %q closed %t", gatewayAddress, closed)
+			forwardSet, closed := bridge.snapshot()
+			if forwardSet || !closed {
+				t.Fatalf("exhausted recovery bridge state = forward %t closed %t", forwardSet, closed)
 			}
 			break
 		}

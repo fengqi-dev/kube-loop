@@ -51,7 +51,8 @@ func assertUnifiedChartConfig(
 	controlPlaneDocument := parseControlPlaneConfig(t, controlPlaneConfig)
 	gatewayConfig := parseUnifiedConfig(t, controlPlaneConfig)["gateway"].(map[string]any)
 	if valueAt(t, controlPlaneDocument, "api", "tunnelPath") != "/tunnel" ||
-		valueAt(t, gatewayConfig, "http", "path") != "/tunnel" {
+		valueAt(t, gatewayConfig, "http", "path") != "/tunnel" ||
+		valueAt(t, gatewayConfig, "forward", "path") != "/tunnel" {
 		t.Fatal("ControlPlane discovery and Data Plane ingress use different tunnel paths")
 	}
 	if valueAt(t, gatewayConfig, "websocket", "streamIdleTimeout") != "30m" {
@@ -112,6 +113,11 @@ func assertWorkloadConfiguration(
 	if !strings.Contains(string(dataPlaneYAML), "--config=/etc/kubeloop/gateway/kubeloop.yaml") ||
 		strings.Contains(string(dataPlaneYAML), "KUBELOOP_GATEWAY_CONFIG_FILE") {
 		t.Fatal("Data Plane must use only its mounted Gateway configuration file")
+	}
+	if !strings.Contains(string(dataPlaneYAML), "mountPath: /tmp") ||
+		!strings.Contains(string(dataPlaneYAML), "name: gateway-runtime") ||
+		!strings.Contains(string(dataPlaneYAML), "emptyDir: {}") {
+		t.Fatal("Data Plane must mount a writable ephemeral runtime directory at /tmp")
 	}
 	if containerHasEnvironment(t, dataPlane, "KUBELOOP_SQLITE_PATH") ||
 		containerHasEnvironment(t, dataPlane, "KUBELOOP_DATASOURCE_URL") {

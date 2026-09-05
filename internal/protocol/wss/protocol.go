@@ -10,6 +10,7 @@ const (
 	Version                     = "2.0"
 	Subprotocol                 = "kubeloop-mux-v2"
 	VersionHeader               = "KubeLoop-WSS-Version"
+	CapabilityTunnelControl     = "tunnel.control.v2"
 	CapabilityTrafficWebSocket  = "traffic.websocket.v1"
 	CapabilityTrafficEncryption = "traffic.noise.v1"
 	MaximumHandshakeBytes       = 8 << 10
@@ -87,7 +88,7 @@ func NewClientHello(clientVersion, deviceID string) ClientHello {
 			"smux.v2",
 			CapabilityTrafficWebSocket,
 			CapabilityTrafficEncryption,
-			"tunnel.open.v2",
+			CapabilityTunnelControl,
 		},
 	}
 }
@@ -107,7 +108,7 @@ func NewServerHello(serverVersion string, limits Limits) ServerHello {
 			"smux.v2",
 			CapabilityTrafficWebSocket,
 			CapabilityTrafficEncryption,
-			"tunnel.open.v2",
+			CapabilityTunnelControl,
 		},
 		Limits: limits,
 	}

@@ -6,11 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/statute"
-
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func (s *Server) handleConnect(
@@ -40,7 +39,7 @@ func (s *Server) handleConnect(
 			return nil
 		}
 	}
-	target, err := s.openGateway(ctx, tunnel.CommandTCP, host, port)
+	target, err := s.dial(ctx, "tcp", net.JoinHostPort(host, strconv.FormatUint(uint64(port), 10)))
 	if err != nil {
 		_ = socks5.SendReply(writer, statute.RepConnectionRefused, nil)
 		return err

@@ -45,6 +45,17 @@ func (verifier *RequestVerifier) Update(next *relayticket.Verifier, revocations 
 }
 
 func (verifier *RequestVerifier) Verify(request *http.Request) (relayticket.Claims, error) {
+	return verifier.verify(request, true)
+}
+
+// VerifyReusable validates a Session-scoped transport ticket without consuming
+// its replay entry. Standard proxy clients may reconnect a WebSocket using
+// static headers; expiry, revocation and generation fencing still apply.
+func (verifier *RequestVerifier) VerifyReusable(request *http.Request) (relayticket.Claims, error) {
+	return verifier.verify(request, false)
+}
+
+func (verifier *RequestVerifier) verify(request *http.Request, consumeReplay bool) (relayticket.Claims, error) {
 	if verifier == nil || request == nil {
 		return relayticket.Claims{}, relayticket.ErrInvalid
 	}
@@ -63,7 +74,7 @@ func (verifier *RequestVerifier) Verify(request *http.Request) (relayticket.Clai
 	claims, err := ticketVerifier.Verify(parts[1])
 	expiresAt := time.Unix(claims.ExpiresAt, 0)
 	if err != nil || (revocations != nil && revocations(claims, verifier.replay.now().UTC())) ||
-		!verifier.replay.Consume(claims.TicketID, expiresAt) ||
+		(consumeReplay && !verifier.replay.Consume(claims.TicketID, expiresAt)) ||
 		!verifier.generations.Accept(claims.SessionID, claims.SessionGeneration, expiresAt) {
 		return relayticket.Claims{}, relayticket.ErrInvalid
 	}

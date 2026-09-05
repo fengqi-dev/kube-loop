@@ -17,10 +17,11 @@ ACME, Tailscale, CCM, OCM, Cloudflared, Naive, USB/IP, OpenVPN, or OpenConnect
 features.
 
 The `kubeloop_minimal` tag narrows sing-box's runtime registries to the types
-emitted by KubeLoop: TUN, direct and SOCKS inbounds; direct and SOCKS
-outbounds; and UDP, hosts and local DNS transports. Optional protocol stubs,
-endpoints and services are excluded so their implementation packages remain
-unreachable to the Go linker.
+emitted by KubeLoop: TUN, direct, SOCKS and Trojan inbounds; direct, SOCKS and
+Trojan outbounds; and UDP, hosts and local DNS transports. Trojan is retained
+for the v3 WebSocket data plane. Optional protocol stubs, endpoints and
+services are excluded so their implementation packages remain unreachable to
+the Go linker.
 
 The same tag limits the command surface to `run`, `check`, and `version` (plus
 Cobra's built-in `help`). Configuration formatting, generation, GeoIP/GeoSite,

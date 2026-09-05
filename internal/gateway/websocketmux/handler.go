@@ -325,6 +325,6 @@ func (h *Handler) trafficEncryptionMatches(identity Identity, capabilities []str
 
 func requiredCapabilitiesPresent(capabilities []string) bool {
 	return slices.Contains(capabilities, "smux.v2") &&
-		slices.Contains(capabilities, "tunnel.open.v2") &&
+		slices.Contains(capabilities, wss.CapabilityTunnelControl) &&
 		slices.Contains(capabilities, wss.CapabilityTrafficWebSocket)
 }

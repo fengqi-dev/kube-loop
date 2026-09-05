@@ -29,6 +29,9 @@ build_gateway() {
     -trimpath -ldflags="-s -w" \
     -o "${BINARY}" \
     ./cmd/kubeloop-gateway
+  go run ./build/singbox-patched.go \
+    -target "linux/${ARCH}" \
+    -output build/bin/sing-box-gateway
 }
 
 host_docker_ok() {
@@ -47,13 +50,15 @@ load_image_minikube() {
   local remote="/tmp/gwbuild"
 
   minikube cp "${BINARY}" /tmp/kubeloop-gateway
+  minikube cp build/bin/sing-box-gateway /tmp/sing-box-gateway
   minikube cp "${DOCKERFILE}" /tmp/Dockerfile.e2e
   minikube ssh -- "
     set -e
-    sudo mkdir -p ${remote}/build/bin
+    sudo mkdir -p ${remote}/build/bin ${remote}/build/runtime
     sudo cp /tmp/kubeloop-gateway ${remote}/build/bin/kubeloop-gateway
+    sudo cp /tmp/sing-box-gateway ${remote}/build/bin/sing-box-gateway
     sudo cp /tmp/Dockerfile.e2e ${remote}/Dockerfile
-    sudo chmod 755 ${remote}/build/bin/kubeloop-gateway
+    sudo chmod 755 ${remote}/build/bin/kubeloop-gateway ${remote}/build/bin/sing-box-gateway
     cd ${remote} && sudo docker build -t ${IMAGE} -f Dockerfile .
   "
 }
@@ -168,7 +173,6 @@ run_tests() {
   KUBELOOP_E2E_CONTEXT="${CONTEXT}" \
   KUBELOOP_GATEWAY_IMAGE="${IMAGE}" \
   KUBELOOP_SINGBOX_PATH="${ROOT}/${SINGBOX_BIN}" \
-  KUBELOOP_REMOTE_TUN_E2E=1 \
   KUBELOOP_E2E_TIMEOUT=30m \
     bash "${ROOT}/e2e/scripts/run-go-test.sh" "$@"
 }

@@ -119,7 +119,7 @@ func TestForwarderPropagatesCorrelationToTokenSourceAndGateway(t *testing.T) {
 	}
 }
 
-func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testing.T) {
+func TestForwarderCarriesTrafficStreams(t *testing.T) {
 	const deviceID = "22222222-2222-4222-8222-222222222222"
 	token, err := tunnel.NewSessionToken()
 	if err != nil {
@@ -127,7 +127,7 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 	}
 	taskID := uuid.NewString()
 	var physicalConnections atomic.Int32
-	results := make(chan error, 2)
+	results := make(chan error, 1)
 	handler, err := servermux.NewHandler(servermux.ServerConfig{
 		Authenticator: servermux.AuthenticatorFunc(func(request *http.Request) (servermux.Identity, error) {
 			physicalConnections.Add(1)
@@ -156,32 +156,6 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 		t.Fatal(err)
 	}
 
-	ordinary, err := net.Dial("tcp", forwarder.Address())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tunnel.WriteOpen(
-		ordinary,
-		tunnel.OpenRequest{Command: tunnel.CommandTCP, Host: "10.42.0.5", Port: 8080},
-		token,
-	); err != nil {
-		t.Fatal(err)
-	}
-	if err := tunnel.ReadStatus(ordinary); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ordinary.Write([]byte("ordinary")); err != nil {
-		t.Fatal(err)
-	}
-	reply := make([]byte, len("ordinary-response"))
-	if _, err := io.ReadFull(ordinary, reply); err != nil {
-		t.Fatal(err)
-	}
-	if string(reply) != "ordinary-response" {
-		t.Fatalf("ordinary response = %q", reply)
-	}
-	_ = ordinary.Close()
-
 	logical, err := forwarder.OpenStream(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -208,15 +182,13 @@ func TestForwarderSharesOnePhysicalWebSocketForTunnelAndTrafficStreams(t *testin
 		t.Fatal(err)
 	}
 
-	for range 2 {
-		select {
-		case err := <-results:
-			if err != nil {
-				t.Fatal(err)
-			}
-		case <-time.After(3 * time.Second):
-			t.Fatal("Gateway logical stream did not finish")
+	select {
+	case err := <-results:
+		if err != nil {
+			t.Fatal(err)
 		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Gateway logical stream did not finish")
 	}
 	if got := physicalConnections.Load(); got != 1 {
 		t.Fatalf("physical /tunnel WebSocket connections = %d, want 1", got)
@@ -314,23 +286,6 @@ func handleTestStream(
 		return errors.New("logical stream Session token changed")
 	}
 	switch header.Command {
-	case tunnel.CommandTCP:
-		request, err := tunnel.ReadOpenBody(connection, header.Command)
-		if err != nil {
-			return err
-		}
-		if request.Address() != "10.42.0.5:8080" {
-			return errors.New("ordinary tunnel target changed")
-		}
-		if err := tunnel.WriteStatus(connection, nil); err != nil {
-			return err
-		}
-		payload := make([]byte, len("ordinary"))
-		if _, err := io.ReadFull(connection, payload); err != nil {
-			return err
-		}
-		_, err = connection.Write([]byte("ordinary-response"))
-		return err
 	case tunnel.CommandTraffic:
 		request, err := tunnel.ReadTrafficOpenBody(connection)
 		if err != nil {

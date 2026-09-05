@@ -124,7 +124,6 @@ export GOCACHE="${CACHE}"
 
 MAIN_PACKAGES=(
   "./e2e/dataplane"
-  "./e2e/remotetun"
 )
 
 MAIN_EXIT=1
@@ -259,6 +258,9 @@ build_gateway_image() {
     go build -trimpath -ldflags="-s -w" \
       -o "${GATEWAY_BINARY}" ./cmd/kubeloop-gateway
   chmod 755 "${GATEWAY_BINARY}"
+  go run ./build/singbox-patched.go \
+    -target "linux/$(go env GOARCH)" \
+    -output build/bin/sing-box-gateway
 
   if using_minikube; then
     require_command minikube
@@ -300,7 +302,6 @@ run_main_tests() {
   export KUBELOOP_E2E_CONTEXT="${CONTEXT}"
   export KUBELOOP_GATEWAY_IMAGE="${GATEWAY_IMAGE}"
   export KUBELOOP_SINGBOX_PATH="${SINGBOX}"
-  export KUBELOOP_REMOTE_TUN_E2E=1
 
   log "Running TUN/Kubernetes E2E"
   set +e

@@ -9,9 +9,9 @@ import (
 	"github.com/things-go/go-socks5"
 	"github.com/things-go/go-socks5/bufferpool"
 	"github.com/things-go/go-socks5/statute"
-
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
+
+const maximumDatagramSize = 65_507
 
 func (s *Server) Serve(listener net.Listener) error {
 	if s.tasks == nil {
@@ -19,7 +19,7 @@ func (s *Server) Serve(listener net.Listener) error {
 	}
 	server := socks5.NewServer(
 		socks5.WithResolver(remoteResolver{}),
-		socks5.WithBufferPool(bufferpool.NewPool(tunnel.MaxDatagramSize+512)),
+		socks5.WithBufferPool(bufferpool.NewPool(maximumDatagramSize+512)),
 		socks5.WithDial(s.dial),
 		socks5.WithConnectHandle(s.handleConnect),
 		socks5.WithAssociateMiddleware(func(

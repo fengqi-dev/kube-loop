@@ -15,6 +15,7 @@ import (
 	clientdiscovery "github.com/fengqi-dev/kube-loop/internal/client/discovery"
 	clientexchange "github.com/fengqi-dev/kube-loop/internal/client/exchange"
 	clientexec "github.com/fengqi-dev/kube-loop/internal/client/exec"
+	clientforward "github.com/fengqi-dev/kube-loop/internal/client/forwardruntime"
 	clientmirror "github.com/fengqi-dev/kube-loop/internal/client/mirror"
 	clientpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh"
 	localpodssh "github.com/fengqi-dev/kube-loop/internal/client/podssh/sshserver"
@@ -23,6 +24,7 @@ import (
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
 	clientremotesession "github.com/fengqi-dev/kube-loop/internal/client/remotesession"
+	"github.com/fengqi-dev/kube-loop/internal/helper"
 	singboxruntime "github.com/fengqi-dev/kube-loop/internal/singbox/runtime"
 	"github.com/fengqi-dev/kube-loop/internal/utils"
 )
@@ -90,7 +92,21 @@ func NewState(version string) (*State, error) {
 	dataPlanes, err := clientdataplane.NewManager(remoteSessions, clientdataplane.Config{
 		ClientVersion: version,
 		TUNStarter:    singboxruntime.NewPrivileged(),
-		OnStatus:      func(clientdataplane.StatusEvent) {},
+		ForwardStart: func(
+			ctx context.Context,
+			options clientdataplane.ForwardOptions,
+		) (clientdataplane.ForwardCore, error) {
+			binary, locateErr := helper.LocateBundledSingBox()
+			if locateErr != nil {
+				return nil, locateErr
+			}
+			return (clientforward.Starter{BinaryPath: binary}).Start(ctx, clientforward.Options{
+				SessionID: options.SessionID, Generation: options.Generation,
+				Endpoint: options.Endpoint, RelayTicket: options.RelayTicket,
+				TLSInsecure: options.TLSInsecure, LogLevel: "info",
+			})
+		},
+		OnStatus: func(clientdataplane.StatusEvent) {},
 	})
 	if err != nil {
 		cancel()

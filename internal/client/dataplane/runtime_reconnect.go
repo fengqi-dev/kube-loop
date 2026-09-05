@@ -8,6 +8,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/client/profile"
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
+	clienttraffic "github.com/fengqi-dev/kube-loop/internal/client/traffic"
 )
 
 func (runtime *Runtime) Reconnect(
@@ -29,6 +30,7 @@ func (runtime *Runtime) Reconnect(
 	if err := ctx.Err(); err != nil {
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		_ = closeForwardCore(transport.forward)
 		return err
 	}
 	runtime.stateMu.Lock()
@@ -37,6 +39,7 @@ func (runtime *Runtime) Reconnect(
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		_ = closeForwardCore(transport.forward)
 		return errors.New("stale or changed Session generation during Data Plane recovery")
 	}
 	networkChanged := session.NetworkSpecHash != runtime.session.NetworkSpecHash
@@ -48,6 +51,7 @@ func (runtime *Runtime) Reconnect(
 		runtime.stateMu.Unlock()
 		_ = transport.control.Close()
 		_ = transport.forwarder.Close()
+		_ = closeForwardCore(transport.forward)
 		return errors.New("data Plane runtime is not awaiting recovery")
 	}
 	restoreTUN := networkChanged && runtime.tun != nil
@@ -65,6 +69,7 @@ func (runtime *Runtime) Reconnect(
 			runtime.stateMu.Unlock()
 			_ = transport.control.Close()
 			_ = transport.forwarder.Close()
+			_ = closeForwardCore(transport.forward)
 			return fmt.Errorf("stop TUN for refreshed NetworkSpec: %w", err)
 		}
 	}
@@ -82,7 +87,9 @@ func (runtime *Runtime) Reconnect(
 			_ = closeForwarder(closeAfterSwap.forwarder)
 		}
 	}()
+	oldForward := runtime.forward
 	runtime.forwarder = transport.forwarder
+	runtime.forward = transport.forward
 	runtime.control = transport.control
 	runtime.token = transport.token
 	runtime.trafficEncryption = transport.trafficEncryption
@@ -91,7 +98,12 @@ func (runtime *Runtime) Reconnect(
 	transportDone := make(chan struct{})
 	runtime.transportDone = transportDone
 	runtime.transportErr = nil
-	runtime.bridge.SetGateway(transport.forwarder.Address(), transport.token)
+	runtime.bridge.SetForwardDialer(nil)
+	if transport.forward != nil {
+		runtime.bridge.SetForwardDialer(clienttraffic.Dialer{Endpoint: clienttraffic.Endpoint{
+			Address: transport.forward.Address(),
+		}})
+	}
 	runtime.session = session
 	runtime.status.SessionID = session.ID
 	runtime.status.SessionGeneration = session.Generation
@@ -103,14 +115,17 @@ func (runtime *Runtime) Reconnect(
 			runtime.stateMu.Unlock()
 			_ = transport.control.Close()
 			_ = transport.forwarder.Close()
+			_ = closeForwardCore(transport.forward)
 			return fmt.Errorf("restore TUN for refreshed NetworkSpec: %w", err)
 		}
 	}
 	runtime.transportWG.Go(func() {
 		runtime.watchControl(transport.control, transportDone)
 	})
+	runtime.startForwardWatch(transport.forward, transportDone)
 	runtime.transportMu.Unlock()
 	runtime.stateMu.Unlock()
+	_ = closeForwardCore(oldForward)
 	return nil
 }
 

@@ -72,7 +72,7 @@ func TestGatewayConfigFlagOverridesEnvironment(t *testing.T) {
 func TestGatewayOverridesUseFlagEnvironmentAndFilePrecedence(t *testing.T) {
 	loaded := options.Config{}
 	loaded.HTTP.Listen = ":8080"
-	loaded.HTTP.Path = "/v1/tunnel"
+	loaded.HTTP.Path = "/tunnel"
 	loaded.WebSocket.MaxSessions = 256
 	loaded.WebSocket.MaxSessionsPerUser = 8
 	loaded.WebSocket.MaxStreamsPerSession = 128
@@ -115,7 +115,7 @@ func TestLoadGatewayConfigAppliesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if config.HTTP.Listen != ":8080" || config.HTTP.Path != "/v1/tunnel" || config.WebSocket.MaxSessions != 256 {
+	if config.HTTP.Listen != ":8080" || config.HTTP.Path != "/tunnel" || config.WebSocket.MaxSessions != 256 {
 		t.Fatalf("Gateway defaults = %#v", config)
 	}
 }

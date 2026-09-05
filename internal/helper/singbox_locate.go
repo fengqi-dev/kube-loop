@@ -17,6 +17,14 @@ func LocateBundledSingBox() (string, error) {
 		name = "sing-box.exe"
 	}
 	var candidates []string
+	// A dev release name is intentionally stable, so its component cache can
+	// contain yesterday's binary after source or registry patches change.
+	// Prefer the asset rebuilt by `wails dev` when running from the repository.
+	if IsDevBuild() {
+		if cwd, err := os.Getwd(); err == nil {
+			candidates = append(candidates, filepath.Join(cwd, "build", "bin", name))
+		}
+	}
 	if path, err := componentstore.Find(Version, name); err == nil {
 		candidates = append(candidates, path)
 	}

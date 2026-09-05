@@ -58,11 +58,11 @@ func TestContractNewClientRejectsUnknownAndMissingServerHelloFields(t *testing.T
 	}{
 		{
 			name: "unknown field",
-			raw:  `{"type":"server_hello","protocolVersion":"2.0","serverVersion":"2.0.0","capabilities":["smux.v2","tunnel.open.v2"],"limits":{"maximumFrameBytes":1048576,"maximumStreamFrameBytes":65536,"maximumStreamsPerConnection":128,"maximumPhysicalConnections":256,"maximumConnectionsPerUser":8,"streamIdleTimeoutMs":1800000},"future":true}`,
+			raw:  `{"type":"server_hello","protocolVersion":"2.0","serverVersion":"2.0.0","capabilities":["smux.v2","tunnel.control.v2"],"limits":{"maximumFrameBytes":1048576,"maximumStreamFrameBytes":65536,"maximumStreamsPerConnection":128,"maximumPhysicalConnections":256,"maximumConnectionsPerUser":8,"streamIdleTimeoutMs":1800000},"future":true}`,
 		},
 		{
 			name: "missing limits",
-			raw:  `{"type":"server_hello","protocolVersion":"2.0","serverVersion":"2.0.0","capabilities":["smux.v2","tunnel.open.v2"]}`,
+			raw:  `{"type":"server_hello","protocolVersion":"2.0","serverVersion":"2.0.0","capabilities":["smux.v2","tunnel.control.v2"]}`,
 		},
 	}
 	for _, test := range tests {
@@ -103,11 +103,11 @@ func TestContractNewGatewayRejectsUnknownAndMissingClientHelloFields(t *testing.
 	}{
 		{
 			name: "unknown field",
-			raw:  `{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","deviceId":"22222222-2222-4222-8222-222222222222","capabilities":["smux.v2","tunnel.open.v2"],"future":true}`,
+			raw:  `{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","deviceId":"22222222-2222-4222-8222-222222222222","capabilities":["smux.v2","tunnel.control.v2"],"future":true}`,
 		},
 		{
 			name: "missing device",
-			raw:  `{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","capabilities":["smux.v2","tunnel.open.v2"]}`,
+			raw:  `{"type":"client_hello","protocolVersions":["2.0"],"clientVersion":"2.0.0","capabilities":["smux.v2","tunnel.control.v2"]}`,
 		},
 	}
 	for _, test := range tests {

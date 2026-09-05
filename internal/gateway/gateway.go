@@ -34,16 +34,13 @@ type SessionAuthorization struct {
 }
 
 type tenantNetwork struct {
-	spec      networkspec.Spec
 	hash      string
 	namespace string
 }
 
 type Server struct {
-	Logger      *slog.Logger
-	DialTimeout time.Duration
-	Resolver    IPResolver
-	Dialer      ContextDialer
+	Logger  *slog.Logger
+	Forward ForwardSessionRuntime
 
 	mu            sync.Mutex
 	tenants       map[tunnel.SessionToken]int
@@ -54,21 +51,20 @@ type Server struct {
 	connectionsWG sync.WaitGroup
 }
 
+// ForwardSessionRuntime owns the per-Session forward data path. The existing
+// control connection remains authoritative for its lifetime.
+type ForwardSessionRuntime interface {
+	Register(context.Context, string, uint64, string, string, networkspec.Spec) error
+	Release(string, uint64)
+}
+
 type TrafficHandler interface {
 	ServeTraffic(context.Context, net.Conn, trafficcontrol.Identity, tunnel.TrafficOpenRequest)
 }
 
-type ContextDialer interface {
-	DialContext(context.Context, string, string) (net.Conn, error)
-}
-
-func NewServer(logger *slog.Logger, dialTimeout time.Duration) *Server {
-	if dialTimeout == 0 {
-		dialTimeout = 10 * time.Second
-	}
+func NewServer(logger *slog.Logger) *Server {
 	return &Server{
 		Logger:      logger,
-		DialTimeout: dialTimeout,
 		tenants:     make(map[tunnel.SessionToken]int),
 		networks:    make(map[tunnel.SessionToken]tenantNetwork),
 		connections: make(map[net.Conn]struct{}),
@@ -220,28 +216,46 @@ func (s *Server) SetTrafficHandler(handler TrafficHandler) {
 type Reporter struct {
 	Gateway         *Server
 	WebSocket       *websocketmux.Handler
+	Forward         sessionAdmissions
 	MaximumPhysical uint32
 	MaximumLogical  uint32
 }
 
+type sessionAdmissions interface {
+	BeginDrain()
+	Draining() bool
+	ActiveSessions() int
+}
+
 func (reporter *Reporter) Snapshot() (relaycontrol.State, relaycontrol.Capacity) {
 	state := relaycontrol.StateReady
-	if reporter.Gateway.Draining() || reporter.WebSocket.Draining() {
+	if reporter.Gateway.Draining() || reporter.WebSocket.Draining() ||
+		(reporter.Forward != nil && reporter.Forward.Draining()) {
 		state = relaycontrol.StateDraining
 	}
 	return state, relaycontrol.Capacity{
 		MaximumPhysicalConnections: reporter.MaximumPhysical,
 		MaximumLogicalStreams:      reporter.MaximumLogical,
 		//nolint:gosec // The WebSocket limiter keeps active sessions within the validated uint32 maximum.
-		ActivePhysicalConnections: uint32(reporter.WebSocket.ActiveSessions()),
+		ActivePhysicalConnections: uint32(reporter.WebSocket.ActiveSessions() + activeSessions(reporter.Forward)),
 		//nolint:gosec // The Gateway tracks logical connections within the validated uint32 maximum.
 		ActiveLogicalStreams: uint32(reporter.Gateway.ActiveConnections()),
 	}
 }
 
+func activeSessions(admissions sessionAdmissions) int {
+	if admissions == nil {
+		return 0
+	}
+	return admissions.ActiveSessions()
+}
+
 func (reporter *Reporter) BeginDrain() {
 	reporter.Gateway.BeginDrain()
 	reporter.WebSocket.BeginDrain()
+	if reporter.Forward != nil {
+		reporter.Forward.BeginDrain()
+	}
 }
 
 type Gateway interface {
@@ -280,13 +294,27 @@ var _ RelayReadiness = (*agent.Agent)(nil)
 // handleControl keeps the immutable NetworkSpec authorization active for the
 // lifetime of a Data Plane Session.
 func (s *Server) handleControl(
+	ctx context.Context,
 	client net.Conn,
+	authorization requiredAuthorization,
 	token tunnel.SessionToken,
 	spec networkspec.Spec,
 	networkSpecHash string,
 	namespace string,
 ) {
 	defer func() { _ = client.Close() }()
+	if s.Forward != nil {
+		if err := s.Forward.Register(
+			ctx, authorization.identity.SessionID, authorization.identity.SessionGeneration,
+			namespace, networkSpecHash, spec,
+		); err != nil {
+			_ = tunnel.WriteStatus(client, fmt.Errorf("start Session forward runtime: %w", err))
+			return
+		}
+		defer s.Forward.Release(
+			authorization.identity.SessionID, authorization.identity.SessionGeneration,
+		)
+	}
 	s.mu.Lock()
 	if existing, ok := s.networks[token]; ok &&
 		(existing.hash != networkSpecHash || existing.namespace != namespace) {
@@ -294,7 +322,7 @@ func (s *Server) handleControl(
 		_ = tunnel.WriteStatus(client, errors.New("session NetworkSpec changed"))
 		return
 	}
-	s.networks[token] = tenantNetwork{spec: spec, hash: networkSpecHash, namespace: namespace}
+	s.networks[token] = tenantNetwork{hash: networkSpecHash, namespace: namespace}
 	s.tenants[token]++
 	s.mu.Unlock()
 	defer s.removeControl(token)
@@ -338,6 +366,17 @@ type gatewayDrainRuntime interface {
 }
 
 type gatewayAdmissionRuntime interface{ BeginDrain() }
+
+type admissionGroup []gatewayAdmissionRuntime
+
+func (group admissionGroup) BeginDrain() {
+	for _, admissions := range group {
+		if admissions != nil {
+			admissions.BeginDrain()
+		}
+	}
+}
+
 type gatewayControlRuntime interface{ Drain(context.Context) error }
 type gatewayAgentLifecycle interface {
 	Stop()

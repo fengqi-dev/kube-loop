@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/sessionspec"
@@ -29,6 +30,42 @@ func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
 		t.Fatal(err)
 	}
 	checkSingBoxConfig(t, binary, "base", content)
+}
+
+func TestGeneratedGatewaySessionConfigAcceptedBySingBox(t *testing.T) {
+	binary := os.Getenv("KUBELOOP_SINGBOX_PATH")
+	if binary == "" {
+		t.Skip("KUBELOOP_SINGBOX_PATH is not set")
+	}
+	content, err := GenerateGatewaySessionConfig(GatewaySessionOptions{
+		SessionID: "session-1", ListenPort: 19091,
+		TrojanPassword: strings.Repeat("a", 64),
+		Network: NetworkSpec{
+			PodCIDRs:       []string{"10.244.0.0/16"},
+			ServiceCIDRs:   []string{"10.96.0.0/12"},
+			ClusterDomains: []string{"cluster.local"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSingBoxConfig(t, binary, "gateway-session", content)
+}
+
+func TestGeneratedClientTrojanConfigAcceptedBySingBox(t *testing.T) {
+	binary := os.Getenv("KUBELOOP_SINGBOX_PATH")
+	if binary == "" {
+		t.Skip("KUBELOOP_SINGBOX_PATH is not set")
+	}
+	content, err := GenerateClientTrojanConfig(ClientTrojanOptions{
+		SessionID: "session-1", ListenPort: 19092,
+		Endpoint: "wss://gateway.example.test/tunnel", RelayTicket: "header.payload.signature",
+		TrojanPassword: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkSingBoxConfig(t, binary, "client-trojan", content)
 }
 
 func checkSingBoxConfig(t *testing.T, binary, name string, content []byte) {

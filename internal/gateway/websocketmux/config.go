@@ -9,7 +9,7 @@ import (
 
 const (
 	Subprotocol = wss.Subprotocol
-	DefaultPath = "/v1/tunnel"
+	DefaultPath = "/tunnel"
 )
 
 const (

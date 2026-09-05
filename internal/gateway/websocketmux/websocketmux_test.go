@@ -538,7 +538,7 @@ func TestHandlerRejectsNewSessionsWhileDraining(t *testing.T) {
 	}
 	handler.BeginDrain()
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v2/tunnel", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/other/tunnel", nil))
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
@@ -877,7 +877,7 @@ func TestHandlerRejectsExpiredRelayTicketIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v2/tunnel", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/other/tunnel", nil))
 	if response.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusUnauthorized)
 	}

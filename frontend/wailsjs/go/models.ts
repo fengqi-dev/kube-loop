@@ -696,24 +696,6 @@ export namespace mcp {
 
 export namespace mirror {
 	
-	export class LocalTarget {
-	    servicePort: number;
-	    protocol: string;
-	    localHost: string;
-	    localPort: number;
-	
-	    static createFrom(source: any = {}) {
-	        return new LocalTarget(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.servicePort = source["servicePort"];
-	        this.protocol = source["protocol"];
-	        this.localHost = source["localHost"];
-	        this.localPort = source["localPort"];
-	    }
-	}
 	export class Info {
 	    id: string;
 	    profileId: string;
@@ -722,7 +704,7 @@ export namespace mirror {
 	    service: string;
 	    clusterIp: string;
 	    state: string;
-	    targets: LocalTarget[];
+	    targets: reverserelay.Target[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Info(source);
@@ -737,7 +719,7 @@ export namespace mirror {
 	        this.service = source["service"];
 	        this.clusterIp = source["clusterIp"];
 	        this.state = source["state"];
-	        this.targets = this.convertValues(source["targets"], LocalTarget);
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -758,11 +740,10 @@ export namespace mirror {
 		    return a;
 		}
 	}
-	
 	export class Request {
 	    profileId: string;
 	    service: string;
-	    targets: LocalTarget[];
+	    targets: reverserelay.Target[];
 	
 	    static createFrom(source: any = {}) {
 	        return new Request(source);
@@ -772,7 +753,7 @@ export namespace mirror {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.profileId = source["profileId"];
 	        this.service = source["service"];
-	        this.targets = this.convertValues(source["targets"], LocalTarget);
+	        this.targets = this.convertValues(source["targets"], reverserelay.Target);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

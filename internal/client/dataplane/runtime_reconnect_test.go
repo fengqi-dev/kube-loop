@@ -12,7 +12,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
@@ -44,6 +43,7 @@ func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
 		Config{
+			ForwardStart: testForwardStart,
 			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
 				if _, err := config.TokenSource(ctx); err != nil {
 					return nil, err
@@ -58,7 +58,7 @@ func TestReconnectKeepsSuccessfulTransportContextAlive(t *testing.T) {
 				go acceptTestControlWithSignal(listener, controls)
 				return &testForwarder{Listener: listener}, nil
 			},
-			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			listenSOCKS: func(context.Context, string) (localBridge, error) {
 				return &testBridge{address: testAddress("127.0.0.1:45002")}, nil
 			},
 		},
@@ -138,6 +138,7 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 			return remote.RelayTicket{Ticket: "relay-ticket"}, nil
 		},
 		Config{
+			ForwardStart: testForwardStart,
 			startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
 				if _, err := config.TokenSource(ctx); err != nil {
 					return nil, err
@@ -149,7 +150,7 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 				go acceptTestControlWithSignal(listener, controls)
 				return &testForwarder{Listener: listener}, nil
 			},
-			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			listenSOCKS: func(context.Context, string) (localBridge, error) {
 				return bridge, nil
 			},
 		},
@@ -190,8 +191,8 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	if status := runtime.Status(); status.SessionGeneration != 3 {
 		t.Fatalf("stale reconnect published status %#v", status)
 	}
-	if gatewayAddress, _ := bridge.snapshot(); gatewayAddress != "127.0.0.1:0" {
-		t.Fatalf("stale reconnect restored bridge target %q", gatewayAddress)
+	if forwardSet, _ := bridge.snapshot(); forwardSet {
+		t.Fatal("stale reconnect restored the forward dialer")
 	}
 	if err := runtime.Reconnect(
 		context.Background(),
@@ -208,11 +209,7 @@ func TestReconnectCannotPublishGenerationOlderThanRuntime(t *testing.T) {
 	if status := runtime.Status(); status.SessionGeneration != 3 || status.State != dataplaneConnected {
 		t.Fatalf("fresh reconnect status = %#v", status)
 	}
-	wantToken, err := tunnel.RelaySessionToken(newest.ID, newest.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gatewayAddress, token := bridge.transport(); gatewayAddress == "127.0.0.1:0" || token != wantToken {
-		t.Fatalf("fresh bridge transport = address %q token %x, want token %x", gatewayAddress, token, wantToken)
+	if forwardSet, _ := bridge.snapshot(); !forwardSet {
+		t.Fatal("fresh reconnect did not restore the forward dialer")
 	}
 }

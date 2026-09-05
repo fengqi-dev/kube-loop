@@ -12,7 +12,6 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/client/remote"
 	"github.com/fengqi-dev/kube-loop/internal/client/websocketmux"
 	"github.com/fengqi-dev/kube-loop/internal/protocol/networkspec"
-	"github.com/fengqi-dev/kube-loop/internal/protocol/tunnel"
 )
 
 func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
@@ -35,7 +34,8 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 	}
 	manager, err := NewManager(tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
-		TUNStarter: tunStarter,
+		TUNStarter:   tunStarter,
+		ForwardStart: testForwardStart,
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -48,7 +48,7 @@ func TestManagerRecoversControlStreamWithFreshSessionGeneration(t *testing.T) {
 			go acceptTestControlWithSignal(listener, controls)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(_ context.Context, _, _ string, _ tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{address: testAddress("127.0.0.1:" + strconv.Itoa(44000+int(starts.Load())))}, nil
 		},
 	})
@@ -123,6 +123,7 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 	manager, err := NewManager(tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
 		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
+		ForwardStart: testForwardStart,
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -135,7 +136,7 @@ func TestManagerSystemResumeRefreshesTransportWithoutReinstallingTUN(t *testing.
 			go acceptTestControlWithSignal(listener, controls)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return &testBridge{address: testAddress("127.0.0.1:48001")}, nil
 		},
 	})
@@ -217,6 +218,7 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	manager, err := NewManager(tickets, Config{
 		RecoveryAttempts: 2, RecoveryBackoff: 10 * time.Millisecond,
 		TUNStarter: tunStarter, OnStatus: func(event StatusEvent) { statusEvents <- event },
+		ForwardStart: testForwardStart,
 		startForwarder: func(ctx context.Context, clientConfig websocketmux.ClientConfig) (streamForwarder, error) {
 			if _, err := clientConfig.TokenSource(ctx); err != nil {
 				return nil, err
@@ -229,7 +231,7 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 			go acceptTestControlWithSignal(listener, controls)
 			return &testForwarder{Listener: listener}, nil
 		},
-		listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(context.Context, string) (localBridge, error) {
 			return bridge, nil
 		},
 	})
@@ -292,12 +294,8 @@ func TestManagerReplacesTransportWhenHeartbeatAdvancesGeneration(t *testing.T) {
 	default:
 		t.Fatal("generation refresh did not retire the old transport")
 	}
-	wantToken, err := tunnel.RelaySessionToken(updated.ID, updated.Generation)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, token := bridge.transport(); token != wantToken {
-		t.Fatalf("bridge token = %x, want generation token %x", token, wantToken)
+	if forwardSet, _ := bridge.snapshot(); !forwardSet {
+		t.Fatal("generation refresh did not restore the forward dialer")
 	}
 	var refreshEvent StatusEvent
 	eventDeadline := time.After(time.Second)

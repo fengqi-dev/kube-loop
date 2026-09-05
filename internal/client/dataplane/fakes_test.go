@@ -254,10 +254,9 @@ type testBridge struct {
 	closed     bool
 	closeErr   error
 	closeCalls int
-	gateway    string
-	token      tunnel.SessionToken
 	hostTCP    socksbridge.HostTCPHandler
 	logHandler socksbridge.LogHandler
+	forwardSet bool
 }
 
 func (bridge *testBridge) Addr() net.Addr { return bridge.address }
@@ -268,16 +267,10 @@ func (bridge *testBridge) Close() error {
 	bridge.closeCalls++
 	return bridge.closeErr
 }
-func (bridge *testBridge) SetGatewayAddress(address string) {
+func (bridge *testBridge) SetForwardDialer(dialer socksbridge.ForwardDialer) {
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()
-	bridge.gateway = address
-}
-func (bridge *testBridge) SetGateway(address string, token tunnel.SessionToken) {
-	bridge.mu.Lock()
-	defer bridge.mu.Unlock()
-	bridge.gateway = address
-	bridge.token = token
+	bridge.forwardSet = dialer != nil
 }
 func (bridge *testBridge) SetHostTCPHandler(handler socksbridge.HostTCPHandler) {
 	bridge.mu.Lock()
@@ -289,15 +282,28 @@ func (bridge *testBridge) SetLogHandler(handler socksbridge.LogHandler) {
 	defer bridge.mu.Unlock()
 	bridge.logHandler = handler
 }
-func (bridge *testBridge) snapshot() (string, bool) {
+func (bridge *testBridge) snapshot() (bool, bool) {
 	bridge.mu.Lock()
 	defer bridge.mu.Unlock()
-	return bridge.gateway, bridge.closed
+	return bridge.forwardSet, bridge.closed
 }
-func (bridge *testBridge) transport() (string, tunnel.SessionToken) {
-	bridge.mu.Lock()
-	defer bridge.mu.Unlock()
-	return bridge.gateway, bridge.token
+
+type testForwardCore struct {
+	address string
+	done    chan struct{}
+	once    sync.Once
+}
+
+func testForwardStart(context.Context, ForwardOptions) (ForwardCore, error) {
+	return &testForwardCore{address: "127.0.0.1:1", done: make(chan struct{})}, nil
+}
+
+func (core *testForwardCore) Address() string       { return core.address }
+func (core *testForwardCore) Done() <-chan struct{} { return core.done }
+func (core *testForwardCore) Err() error            { return nil }
+func (core *testForwardCore) Close() error {
+	core.once.Do(func() { close(core.done) })
+	return nil
 }
 
 type testAddress string

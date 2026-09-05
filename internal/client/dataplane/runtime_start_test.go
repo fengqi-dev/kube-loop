@@ -59,6 +59,7 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 		_, _ = connection.Read(buffer[:])
 	}()
 	bridge := &testBridge{address: testAddress("127.0.0.1:43123")}
+	forwardCore := &testForwardCore{address: "127.0.0.1:43124", done: make(chan struct{})}
 	ticketCalls := 0
 	runtime, err := Start(context.Background(), profile.Profile{
 		ID: "service", BaseURL: "https://gateway.example.test", TunnelPath: "/relay/tunnel",
@@ -74,6 +75,13 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 		}, nil
 	}, Config{
 		ClientVersion: "2.4.0",
+		ForwardStart: func(_ context.Context, options ForwardOptions) (ForwardCore, error) {
+			if options.Endpoint != "wss://assigned-relay.example.test/tunnel" ||
+				options.RelayTicket != "relay-ticket" || options.Generation != 1 {
+				t.Fatalf("forward options = %#v", options)
+			}
+			return forwardCore, nil
+		},
 		startForwarder: func(ctx context.Context, config websocketmux.ClientConfig) (streamForwarder, error) {
 			if config.URL != "wss://assigned-relay.example.test/tunnel" {
 				t.Fatalf("WebSocket URL = %q", config.URL)
@@ -93,14 +101,14 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 			}
 			return &readSignalConn{Conn: connection, read: statusRead}, nil
 		},
-		listenSOCKS: func(_ context.Context, gatewayAddress, listenAddress string, _ tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(_ context.Context, listenAddress string) (localBridge, error) {
 			select {
 			case <-statusRead:
 			default:
 				t.Fatal("SOCKS listener started before Data Plane authorization was acknowledged")
 			}
-			if gatewayAddress != listener.Addr().String() || listenAddress != DefaultListenAddress {
-				t.Fatalf("SOCKS addresses = %q %q", gatewayAddress, listenAddress)
+			if listenAddress != DefaultListenAddress {
+				t.Fatalf("SOCKS address = %q", listenAddress)
 			}
 			return bridge, nil
 		},
@@ -108,8 +116,14 @@ func TestStartRegistersAuthorizedControlBeforeOpeningSOCKS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ticketCalls != 1 || runtime.Status().SOCKSAddress != "127.0.0.1:43123" {
+	if ticketCalls != 2 || runtime.Status().SOCKSAddress != "127.0.0.1:43123" {
 		t.Fatalf("ticket calls = %d, status = %#v", ticketCalls, runtime.Status())
+	}
+	bridge.mu.Lock()
+	forwardSet := bridge.forwardSet
+	bridge.mu.Unlock()
+	if !forwardSet {
+		t.Fatal("SOCKS bridge did not switch to the Trojan forward runtime")
 	}
 	if err := runtime.Close(); err != nil {
 		t.Fatal(err)
@@ -204,7 +218,7 @@ func TestStartClosesTransportWhenAuthorizationIsRejected(t *testing.T) {
 		Config{
 			startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
 			dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
-			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			listenSOCKS: func(context.Context, string) (localBridge, error) {
 				bridgeStarted = true
 				return nil, errors.New("unexpected")
 			},
@@ -270,7 +284,7 @@ func TestStartClosesAuthorizedTransportWhenSOCKSBridgeFails(t *testing.T) {
 		Config{
 			startForwarder: func(context.Context, websocketmux.ClientConfig) (streamForwarder, error) { return forwarder, nil },
 			dialContext:    func(context.Context, string, string) (net.Conn, error) { return client, nil },
-			listenSOCKS: func(context.Context, string, string, tunnel.SessionToken) (localBridge, error) {
+			listenSOCKS: func(context.Context, string) (localBridge, error) {
 				return nil, bridgeFailure
 			},
 		},
@@ -319,7 +333,7 @@ func TestStartUsesAutomaticPortWhenDefaultSOCKSAddressIsBusy(t *testing.T) {
 			return forwarder, nil
 		},
 		dialContext: func(context.Context, string, string) (net.Conn, error) { return client, nil },
-		listenSOCKS: func(_ context.Context, _, address string, _ tunnel.SessionToken) (localBridge, error) {
+		listenSOCKS: func(_ context.Context, address string) (localBridge, error) {
 			listenAddresses = append(listenAddresses, address)
 			if len(listenAddresses) == 1 {
 				return nil, errors.New("listen tcp 127.0.0.1:1080: bind: address already in use")
