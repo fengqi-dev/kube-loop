@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,7 @@ type Config struct {
 
 type Manager struct {
 	ctx    context.Context
+	cancel context.CancelFunc
 	config Config
 	mu     sync.Mutex
 	items  map[tunnel.SessionToken]*sessionProcess
@@ -65,7 +67,14 @@ func NewManager(ctx context.Context, config Config) (*Manager, error) {
 	if config.ReadyTimeout <= 0 {
 		config.ReadyTimeout = defaultReadyTimeout
 	}
-	return &Manager{ctx: ctx, config: config, items: make(map[tunnel.SessionToken]*sessionProcess)}, nil
+	// Gateway shutdown cancels the Run context before serveGateway starts its
+	// drain window. Keep session processes alive until Manager.Close so active
+	// WebSocket streams can finish during that window.
+	lifetimeCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	return &Manager{
+		ctx: lifetimeCtx, cancel: cancel, config: config,
+		items: make(map[tunnel.SessionToken]*sessionProcess),
+	}, nil
 }
 
 func (manager *Manager) Register(
@@ -179,7 +188,11 @@ func (manager *Manager) startLocked(
 		select {
 		case <-done:
 			cancel()
+			startupLog := readLogTail(filepath.Join(directory, "sing-box.log"))
 			cleanup()
+			if startupLog != "" {
+				return nil, fmt.Errorf("gateway sing-box exited before ready: %w: %s", process.err(), startupLog)
+			}
 			return nil, fmt.Errorf("gateway sing-box exited before ready: %w", process.err())
 		case <-readyCtx.Done():
 			cancel()
@@ -189,6 +202,18 @@ func (manager *Manager) startLocked(
 		case <-time.After(25 * time.Millisecond):
 		}
 	}
+}
+
+func readLogTail(path string) string {
+	const maximumLogBytes = 8 << 10
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	if len(contents) > maximumLogBytes {
+		contents = contents[len(contents)-maximumLogBytes:]
+	}
+	return strings.TrimSpace(string(contents))
 }
 
 func (manager *Manager) Release(sessionID string, generation uint64) {
@@ -244,6 +269,7 @@ func (manager *Manager) Close() error {
 	}
 	clear(manager.items)
 	manager.mu.Unlock()
+	manager.cancel()
 	for _, process := range processes {
 		manager.stop(process)
 	}
