@@ -59,7 +59,8 @@ func enableService(binaryPath string) error {
 	//nolint:gosec // label is selected from fixed helper service identifiers.
 	_ = exec.Command("launchctl", "enable", "system/"+label).Run()
 	//nolint:gosec // label is selected from fixed helper service identifiers.
-	_ = exec.Command("launchctl", "kickstart", "-k", "system/"+label).Run()
+	// RunAtLoad already starts the helper; kickstart must not kill it again.
+	_ = exec.Command("launchctl", "kickstart", "system/"+label).Run()
 	return nil
 }
 

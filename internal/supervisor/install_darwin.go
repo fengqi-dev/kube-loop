@@ -56,7 +56,8 @@ func Install(source, expectedSHA256, token string, uid int) error {
 	//nolint:gosec // ServiceLabel is selected from fixed supervisor identifiers.
 	_ = exec.Command("/bin/launchctl", "enable", "system/"+config.ServiceLabel).Run()
 	//nolint:gosec // ServiceLabel is selected from fixed supervisor identifiers.
-	kickstart := exec.Command("/bin/launchctl", "kickstart", "-k", "system/"+config.ServiceLabel)
+	// RunAtLoad may already have started the service. Do not kill that instance.
+	kickstart := exec.Command("/bin/launchctl", "kickstart", "system/"+config.ServiceLabel)
 	if output, err := kickstart.CombinedOutput(); err != nil {
 		return fmt.Errorf("start supervisor: %w: %s", err, strings.TrimSpace(string(output)))
 	}

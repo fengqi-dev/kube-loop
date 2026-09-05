@@ -89,8 +89,9 @@ func (w launchdWorker) Start(ctx context.Context) error {
 		!strings.Contains(string(output), "service already loaded") {
 		return fmt.Errorf("bootstrap worker: %w: %s", err, strings.TrimSpace(string(output)))
 	}
+	// Start follows Stop for updates/restarts; preserve any instance started by bootstrap.
 	target := "system/" + w.config.WorkerLabel
-	if output, err := exec.CommandContext(ctx, "/bin/launchctl", "kickstart", "-k", target).
+	if output, err := exec.CommandContext(ctx, "/bin/launchctl", "kickstart", target).
 		CombinedOutput(); err != nil {
 		return fmt.Errorf("kickstart worker: %w: %s", err, strings.TrimSpace(string(output)))
 	}
