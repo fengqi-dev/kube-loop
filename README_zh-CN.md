@@ -185,18 +185,19 @@ EndpointSlice。
 ```text
 本地应用
   → TUN 或 SOCKS5 + 托管 sing-box / split DNS
-  → RelayTicket 认证的 WSS Relay
-  → 分配给当前 Session 的 Data Plane
+  → RelayTicket 认证的 Trojan over WebSocket
+  → 分配给当前 Session 的 Gateway
   → Pods / Services / CoreDNS
 ```
 
 **Control Plane** 负责身份认证、策略、Cluster Session、任务所有权与 Kubernetes
-资源操作。**Data Plane** 仅承载已授权 Session 的流量，不持有 Kubernetes 凭据。
+资源操作。**Gateway** 通过 Trojan/WSS 承载正向流量，并通过 control WSS 承载反向 Task；
+不持有 Kubernetes 凭据。
 本地 **Helper** 只在 TUN 模式管理 sing-box 进程、interface、route、split DNS
 与恢复状态；SOCKS 模式无需特权 Helper。
 
 完整控制面、数据面与恢复机制请参阅[系统设计](docs/design.zh-CN.md)和
-[统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)。
+[Trojan-over-WebSocket 数据面](docs/adr/0024-v3-trojan-over-websocket-data-plane.md)。
 
 ## Pod SSH
 
@@ -264,7 +265,7 @@ shadcn 规范。GitHub Pages 会在发布前重新构建站点。
 
 - [系统设计](docs/design.zh-CN.md)
 - [Operator 指南](docs/operator.zh-CN.md)
-- [统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)
+- [Trojan-over-WebSocket 数据面](docs/adr/0024-v3-trojan-over-websocket-data-plane.md)
 - [V2 路线图](docs/v2-roadmap.zh-CN.md)
 - [E2E 覆盖范围](docs/v2-e2e-coverage.zh-CN.md)
 - [Kubernetes 调用点](docs/v2-kubernetes-call-sites.zh-CN.md)

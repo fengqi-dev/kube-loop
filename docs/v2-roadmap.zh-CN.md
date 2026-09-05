@@ -4,8 +4,6 @@
 > 目标版本：v2.0.0
 > 规划基线：v1.11.0
 
-配套架构与关键流程图见 [`diagrams/kubeloop-v2-architecture.drawio`](diagrams/kubeloop-v2-architecture.drawio)。该文件包含整体架构、OIDC 登录、Session/RelayTicket、核心数据路径、Traffic Task 生命周期和断线恢复六个可编辑页面。
-
 ## 1. V2 目标
 
 V2 将 KubeLoop 从“持有 kubeconfig 并直接访问 Kubernetes API 的桌面工具”改造为“集群内 Gateway 服务 + 轻量桌面客户端”。
@@ -585,7 +583,6 @@ Gateway 使用统一的 `AuthProvider` 抽象，支持 OIDC，并通过独立的
 - [x] **V2-803：跨平台客户端 E2E。**
   - macOS、Windows、Linux 覆盖安装、登录、TUN、DNS、退出、升级和卸载。
   - 操作系统休眠、网络切换后 Session 能恢复或安全清理。
-  - 2026-08-11（完成）：新增可移植的休眠间隔检测器和 Data Plane `ResumeAll` 恢复路径；唤醒时主动中断陈旧 transport、刷新权威 Session/RelayTicket，并原位重连，保持 SOCKS 地址和 Helper TUN Session 不变。`e2e/remotetun` 使用实际特权 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 授权和精确目标路由，验证休眠间隔前后直接访问 `100.64.0.42:443` 均成功，且停止后 Helper Session 为零。GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 的 Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过：Windows/macOS 均完成 Helper 安装、升级、ACL/DNS 平台恢复、真实远端 TUN/唤醒和卸载；Linux 完成 Minikube V2 数据面及相同远端 TUN/唤醒门禁。Windows SQLite 路径、固定容器 Secret 路径、PodSSH WebSocket 关闭和 sing-box `.exe` 产物/夹具差异均已纳入回归。
 
 - [ ] **V2-804：可观测性。**
   - 添加 RED 指标、active session/stream/task gauge、Kubernetes API latency 和 cleanup failure。

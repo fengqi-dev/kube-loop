@@ -56,7 +56,8 @@ capabilities and effective limits. V2 currently implements only protocol
 not only configuration.
 
 Both peers require `traffic.websocket.v1` in addition to `smux.v2` and
-`tunnel.open.v2`. This capability means Exchange, Mirror and Preview use a
+`tunnel.control.v2`. These capabilities mean the control connection and
+Exchange, Mirror and Preview use a
 bounded KCG2 logical stream inside `/tunnel`; no secondary public WebSocket
 path is part of the negotiated protocol.
 
@@ -99,7 +100,7 @@ binary and maps as follows:
 | Semantic operation | Wire representation |
 | --- | --- |
 | physical keepalive | WebSocket Ping/Pong plus smux NOP |
-| logical stream open | smux SYN, followed by a bounded KCG2 TCP/UDP/control/traffic header |
+| logical stream open | smux SYN, followed by a bounded KCG2 control or traffic header |
 | target accept | KCG2 `StatusOK` |
 | target reject | KCG2 bounded `StatusError`, then stream close |
 | data | smux PSH carrying KubeLoop data frames of at most 64 KiB |
@@ -107,10 +108,11 @@ binary and maps as follows:
 | half-close | KubeLoop logical FIN frame; the peer may continue sending |
 | cancel/full close | close the smux stream; transport/context cancellation closes both directions |
 
-The KCG2 open header binds every logical stream to the RelayTicket's immutable
-Cluster Session ID/generation-derived tenant key and an authorized target,
-control operation or traffic Task. The server rechecks generation and authorization
-before handing a stream to the dialer. smux native FIN is not used as TCP
+The KCG2 header binds every logical stream to the RelayTicket's immutable
+Cluster Session ID/generation-derived tenant key and a control operation or
+traffic Task. Forward TCP/UDP no longer uses this protocol; ADR 0024 assigns it
+to Trojan over WebSocket. The server rechecks generation and authorization
+before dispatching reverse traffic. smux native FIN is not used as TCP
 half-close because crossed native FINs can discard unread response data; the
 explicit KubeLoop FIN preserves request-EOF/response-after-EOF behavior.
 

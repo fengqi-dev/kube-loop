@@ -1,4 +1,4 @@
-# KubeLoop V2 系统设计
+# KubeLoop 系统设计
 
 KubeLoop 在不向桌面端交付 kubeconfig 或 Kubernetes 凭据的前提下，让开发机访问已授权的
 Kubernetes 网络和工作负载操作。
@@ -11,10 +11,32 @@ Kubernetes 网络和工作负载操作。
   生命周期与异常恢复。SOCKS 模式不需要 Helper。
 - **Control Plane**：负责身份认证、策略和 Kubernetes SSAR、Cluster Session、Task、
   Kubernetes API/SPDY 操作，并签发短期 RelayTicket。
-- **Relay**：接收受 RelayTicket 约束的 WebSocket transport 并复用逻辑 stream；它不是权限数据库。
-- **Data Plane**：分配给特定 Cluster Session，连接已授权的集群目标；不持有 OAuth token、
-  kubeconfig 或 Kubernetes 凭据。
+- **Gateway**：接收受 RelayTicket 约束的 WebSocket transport。Trojan over WebSocket 承载
+  正向 TCP/UDP 流量，KubeLoop control WebSocket 承载 Session 授权与反向 Task stream；
+  不持有 OAuth token、kubeconfig 或 Kubernetes 凭据。
 - **Operator**：调谐持久化 `TrafficBinding`，为 Exchange、Mirror、Preview 恢复或清理资源。
+
+## Gateway 架构
+
+![KubeLoop Gateway 架构](gateway-architecture.drawio.svg)
+
+两个公开 transport 都从 `/tunnel` 进入。只有请求 `kubeloop-mux-v2` WebSocket 子协议时，
+共享 handler 才选择 control WSS；其他有效 WebSocket Upgrade 进入 Trojan proxy。通过认证的
+control stream 会先注册 Session generation 与 NetworkSpec，然后才允许正向流量进入。Trojan
+proxy 将该 generation 解析到 loopback、按 Session 隔离的 sing-box runtime，runtime 的最终
+route 默认拒绝。Relay Agent 独立向 Control Plane 注册容量，并同步 lease、ticket key、撤销
+列表和 draining 状态。Gateway 只通过集群网络连接 workload 地址，不调用 Kubernetes API。
+
+## 端到端流量流转
+
+![KubeLoop 端到端流量流转](traffic-flow.drawio.svg)
+
+Port Forward 与 TUN 共用一条客户端发起的正向路径：Desktop sing-box、Trojan over WSS、
+Gateway proxy、受 NetworkSpec 限制的 Gateway sing-box runtime，响应沿原路径返回。
+Exchange 与 Preview 使用双向 reverse Task stream：`TrafficBinding` 将集群流量导向 Gateway
+listener，再由 control WSS 转发到创建任务时保留的本地 target。Mirror 的真实请求与响应始终
+走 primary path，只有 shadow copy 单向发送到本地 observer，本地返回内容会被丢弃。Session
+API、Relay Registry 和 Operator 调谐都属于控制路径，不承载应用 payload。
 
 ## 连接生命周期
 
@@ -22,15 +44,15 @@ Kubernetes 网络和工作负载操作。
 2. 通过系统浏览器完成 Authorization Code + PKCE 登录，Access/Refresh 凭据只属于该 Profile。
 3. 用户选择已授权 Namespace 与 SOCKS/TUN 模式。
 4. 桌面端创建 Cluster Session；Control Plane 返回精确 NetworkSpec、分配的 Data Plane 与短期 RelayTicket。
-5. 桌面端建立 RelayTicket 认证的 WSS。SOCKS 监听 loopback；TUN 还会通过 Helper 安装范围明确的 route 与 split DNS。
+5. 桌面端建立 RelayTicket 认证的 Trojan/WSS 与 control WSS。SOCKS 监听 loopback；TUN 还会通过 Helper 安装范围明确的 route 与 split DNS。
 6. heartbeat 续期 Session 并轮换 transport 材料。断开、logout、切换 Profile/Namespace 或 grant 撤销都会清理旧 Task 与 Session。
 
 ```text
 本地应用
   -> TUN 或 loopback SOCKS
   -> 托管 sing-box
-  -> RelayTicket 认证的 WSS Relay
-  -> 分配给当前 Session 的 Data Plane
+  -> RelayTicket 认证的 Trojan over WebSocket
+  -> 分配给当前 Session 的 Gateway
   -> Pod / Service / CoreDNS
 ```
 
@@ -80,4 +102,4 @@ MCP 只监听 loopback，默认启用自动生成的 bearer token。V2 暴露六
 - Task 终态与 request ID 用于审计诊断；凭据和 MCP token 不写入普通 Profile 文件。
 
 MCP 授权详见 [ADR 0015](adr/0015-v2-mcp-trust-boundary.md)，transport 细节详见
-[V2 数据面设计](singbox-traffic-dataplane.zh-CN.md)。
+[ADR 0024](adr/0024-v3-trojan-over-websocket-data-plane.md)。

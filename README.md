@@ -173,20 +173,21 @@ when a workflow stops or the cluster connection closes.
 ```text
 Local applications
   → TUN or SOCKS5 + managed sing-box / split DNS
-  → RelayTicket-authenticated WSS Relay
-  → assigned, Session-scoped Data Plane
+  → RelayTicket-authenticated Trojan over WebSocket
+  → assigned, Session-scoped Gateway
   → Pods / Services / CoreDNS
 ```
 
 The **Control Plane** owns authentication, policy, Cluster Session state, task
-ownership, and Kubernetes operations. The **Data Plane** carries only
-authorized Session traffic and holds no Kubernetes credentials. The local
+ownership, and Kubernetes operations. The **Gateway** carries forward traffic
+over Trojan/WSS and reverse Tasks over the control WSS; it holds no Kubernetes
+credentials. The local
 **Helper** is used only by TUN mode to manage KubeLoop's sing-box process,
 interface, routes, split DNS, and recovery state; SOCKS mode requires no
 privileged Helper.
 
 Read [System design](docs/design.md) and
-[Unified traffic data plane](docs/singbox-traffic-dataplane.md) for the full
+[Trojan-over-WebSocket data plane](docs/adr/0024-v3-trojan-over-websocket-data-plane.md) for the full
 control-plane, data-plane, and recovery model.
 
 ## Pod SSH
@@ -257,7 +258,7 @@ before deployment.
 
 - [System design](docs/design.md)
 - [Operator guide](docs/operator.zh-CN.md)
-- [Traffic data plane](docs/singbox-traffic-dataplane.md)
+- [Trojan-over-WebSocket data plane](docs/adr/0024-v3-trojan-over-websocket-data-plane.md)
 - [V2 roadmap](docs/v2-roadmap.zh-CN.md)
 - [E2E coverage](docs/v2-e2e-coverage.zh-CN.md)
 - [Kubernetes call sites](docs/v2-kubernetes-call-sites.zh-CN.md)

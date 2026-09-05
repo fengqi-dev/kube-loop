@@ -1,4 +1,4 @@
-# KubeLoop V2 system design
+# KubeLoop system design
 
 KubeLoop connects a developer workstation to authorized Kubernetes network and
 workload operations without putting kubeconfig or Kubernetes credentials in the
@@ -16,12 +16,41 @@ desktop application.
 - **Control Plane** authenticates users, applies policy and Kubernetes SSAR,
   owns Cluster Sessions and Tasks, performs Kubernetes API and SPDY operations,
   and issues short-lived RelayTickets.
-- **Relay** accepts ticket-bound WebSocket transports and multiplexes logical
-  streams. It is not an authorization database.
-- **Data Plane** is assigned to a Cluster Session and dials authorized cluster
-  destinations. It holds no OAuth token, kubeconfig, or Kubernetes credential.
+- **Gateway** accepts ticket-bound WebSocket transports. Trojan over WebSocket
+  carries forward TCP/UDP traffic, while the KubeLoop control WebSocket carries
+  Session authorization and reverse Task streams. It holds no OAuth token,
+  kubeconfig, or Kubernetes credential.
 - **Operator** reconciles durable `TrafficBinding` resources and restores or
   removes Kubernetes resources for Exchange, Mirror, and Preview workflows.
+
+## Gateway architecture
+
+![KubeLoop Gateway architecture](gateway-architecture.drawio.svg)
+
+Both public transports enter through `/tunnel`. The shared handler selects the
+control WSS path only when the client requests the `kubeloop-mux-v2` WebSocket
+subprotocol; every other valid WebSocket Upgrade is handled by the Trojan
+proxy. An authenticated control stream registers the Session generation and
+its NetworkSpec before forward traffic is admitted. The proxy then resolves
+that generation to a loopback, per-Session sing-box runtime, whose final route
+is deny-by-default. The Relay Agent independently registers capacity and
+refreshes leases, ticket keys, revocations, and draining state with the Control
+Plane. Gateway connects to workload addresses through the cluster network and
+does not call the Kubernetes API.
+
+## End-to-end traffic flow
+
+![KubeLoop end-to-end traffic flow](traffic-flow.drawio.svg)
+
+Port Forward and TUN share one client-initiated path through the desktop
+sing-box, Trojan over WSS, the Gateway proxy, and a NetworkSpec-scoped Gateway
+sing-box runtime. Responses return along the same path. Exchange and Preview
+instead use bidirectional reverse-task streams: `TrafficBinding` routes cluster
+traffic to a Gateway listener, and the control WSS carries it to the retained
+local target. Mirror keeps the real request and response on the primary path;
+only a shadow copy travels to the local observer, and the observer response is
+discarded. Session APIs, Relay Registry traffic, and Operator reconciliation
+are control paths and never carry application payload bytes.
 
 ## Connection lifecycle
 
@@ -32,9 +61,9 @@ desktop application.
 3. The user selects an authorized Namespace and connection mode.
 4. The desktop creates a Cluster Session. The Control Plane returns the exact
    NetworkSpec, assigned Data Plane, and short-lived RelayTicket.
-5. The desktop establishes a RelayTicket-authenticated WSS transport. SOCKS is
-   exposed on loopback; TUN additionally installs scoped routes and split DNS
-   through the Helper.
+5. The desktop establishes RelayTicket-authenticated Trojan/WSS and control WSS
+   transports. SOCKS is exposed on loopback; TUN additionally installs scoped
+   routes and split DNS through the Helper.
 6. Heartbeats renew Session state and rotate transport material. Disconnect,
    logout, Profile switching, namespace switching, or grant revocation drains
    tasks and closes the old Session.
@@ -43,8 +72,8 @@ desktop application.
 Local application
   -> TUN or loopback SOCKS
   -> managed sing-box
-  -> RelayTicket-authenticated WSS Relay
-  -> assigned Data Plane
+  -> RelayTicket-authenticated Trojan over WebSocket
+  -> assigned Gateway
   -> Pod / Service / CoreDNS
 ```
 
@@ -110,4 +139,4 @@ Profile, load kubeconfig, or mutate Helper/network configuration.
   credentials and MCP tokens are never written to ordinary profile files.
 
 See [ADR 0015](adr/0015-v2-mcp-trust-boundary.md) for MCP authorization and
-[the V2 data-plane design](singbox-traffic-dataplane.md) for transport details.
+[ADR 0024](adr/0024-v3-trojan-over-websocket-data-plane.md) for transport details.

@@ -47,8 +47,8 @@
 ## 身份、容量与平台证据
 
 - `internal/client/auth` 与 `internal/controlplane/authn/oauthserver` 分层验证 Access/Refresh Token 轮换、重放拒绝与撤销；管理 API 的 IAM、OAuth Client、审计导出和授权边界由对应服务与 HTTP handler 测试覆盖。
-- `make capacity-baseline` 验证全局/单用户物理 WSS、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics；三轮 32 KiB stream benchmark 记录吞吐和分配。`TestGatewayPodMultiUserCapacityRSSAndCleanup` 在单个真实 Gateway Pod 上以四名 Identity/四条物理 WSS/十六条逻辑 stream 验证限额、容量复用、集群内吞吐和 kubelet working-set 曲线；满载期间撤销 OAuth grant，确认 Preview Task、relay、TrafficBinding、Service、EndpointSlice 和 snapshot 在 5 秒预算内全部清理。
-- Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。`e2e/remotetun` 已接入三平台 workflow，使用实际 Helper、sing-box TUN、WSS/smux Gateway、RelayTicket/NetworkSpec 和精确目标路由，验证休眠间隔触发 transport 刷新后 SOCKS 地址、TUN core 与 Helper Session 保持不变，且停止后无特权资源残留。最终门禁已由 GitHub Actions push workflow [31454657118](https://github.com/fengqi-dev/kube-loop/actions/runs/31454657118) 完成：Windows、macOS、Linux、Helm、主 Go 与前端六个作业全部通过，V2-803 已关闭。
+- `make capacity-baseline` 验证 control WSS 的全局/单用户物理连接、逻辑 stream 上限、容量释放，以及满载时 live/ready/metrics。
+- Windows/macOS workflow 运行全量本地测试和真实 Helper 安装、升级、ACL、DNS 恢复、卸载；Linux 额外运行完整 Minikube TUN。
 
 自动 CI 由 `Checks` 与 `Database` 提供前端、Go 静态检查、单元/Race、跨平台构建和
 PostgreSQL/MySQL 门禁；`Checks` 通过后并行运行 Helm 生命周期、Operator、Linux Minikube、
@@ -61,11 +61,10 @@ live TUI E2E 仍保持显式手工运行，不能用 fixture 结果替代。
 ```bash
 KUBELOOP_E2E=1 \
 KUBELOOP_E2E_CONTEXT=minikube \
-KUBELOOP_REMOTE_TUN_E2E=1 \
 KUBELOOP_GATEWAY_IMAGE=<由当前工作树构建的镜像> \
 KUBELOOP_SINGBOX_PATH=<当前 sing-box 路径> \
-KUBELOOP_E2E_PACKAGES='./e2e/dataplane ./e2e/remotetun' \
+KUBELOOP_E2E_PACKAGES='./e2e/dataplane' \
 bash ./e2e/scripts/run-go-test.sh
 ```
 
-通用入口会在目标 context 安装当前 TrafficBinding CRD，并以隔离 kubeconfig 启动当前工作树 Operator；专用 Kubebuilder 套件仍由 `make operator-test-e2e` 独立执行。2026-08-11 加入真实单 Pod 容量/RSS/满载撤权，以及 Helper/TUN/WSS 休眠恢复后，`e2e/dataplane` 完整复跑通过（`194.739s`），`e2e/remotetun` 通过（`1.647s`）。此前 File Transfer 同场景连续 10 次复跑通过；Preview 专项确认 TrafficBinding、Service、EndpointSlice 与 durable snapshot 全部释放（`30.398s`）；隔离 kubeconfig 的 Operator 部署、受保护 metrics、Preview TrafficBinding 调谐与 finalizer 清理套件 3/3 通过，且中断后可幂等重跑；`make helm-test-e2e` 在 Minikube Kubernetes v1.35.1 完整通过 SQLite/PostgreSQL 安装、独立升级、扩缩容、回滚、Pod 恢复、审计/管理撤权、数据保留和卸载/CRD retain。
+通用入口会在目标 context 安装当前 TrafficBinding CRD，并以隔离 kubeconfig 启动当前工作树 Operator；专用 Kubebuilder 套件仍由 `make operator-test-e2e` 独立执行。
