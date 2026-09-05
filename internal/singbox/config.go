@@ -40,6 +40,7 @@ const (
 	configTagKey          = "tag"
 	configTypeKey         = "type"
 	configSOCKSType       = "socks"
+	configUDPType         = "udp"
 	logicalRuleModeOr     = "or"
 	logicalRuleType       = "logical"
 	hostsDNSServer        = "hosts"

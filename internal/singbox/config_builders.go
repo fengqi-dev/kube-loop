@@ -92,7 +92,7 @@ func buildDNSConfig(network NetworkSpec, options Options) (generatedDNS, error) 
 			return generatedDNS{}, fmt.Errorf("invalid cluster DNS address %q: %w", network.DNSServer, parseErr)
 		}
 		dnsServers = append(dnsServers, map[string]any{
-			configTypeKey:   "udp",
+			configTypeKey:   configUDPType,
 			configTagKey:    "cluster",
 			configServerKey: dnsIP.String(),
 			"detour":        KubernetesOutbound,

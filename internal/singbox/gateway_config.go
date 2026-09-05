@@ -3,6 +3,7 @@ package singbox
 import (
 	"encoding/json"
 	"fmt"
+	"net/netip"
 
 	"github.com/fengqi-dev/kube-loop/internal/protocol/dns"
 )
@@ -10,6 +11,7 @@ import (
 const (
 	GatewayTrojanInbound  = "kubeloop-trojan-in"
 	gatewayDirectOutbound = "kubeloop-cluster"
+	clusterDNSServer      = "kubeloop-cluster-dns"
 	GatewayWebSocketPath  = "/_kubeloop/v3/session"
 )
 
@@ -47,23 +49,24 @@ func GenerateGatewaySessionConfig(options GatewaySessionOptions) ([]byte, error)
 	}
 
 	allowRules := make([]map[string]any, 0, 2)
+	if len(domains) > 0 && options.Network.DNSServer != "" {
+		allowRules = append(allowRules, map[string]any{
+			configInboundKey:      []string{GatewayTrojanInbound},
+			configDomainSuffixKey: domains,
+			configActionKey:       "resolve", configServerKey: clusterDNSServer,
+		})
+	}
 	allowRules = append(allowRules, map[string]any{
 		configInboundKey:  []string{GatewayTrojanInbound},
 		configIPCIDRKey:   routes,
 		configOutboundKey: gatewayDirectOutbound,
 	})
-	if len(domains) > 0 {
-		allowRules = append(allowRules, map[string]any{
-			configInboundKey:      []string{GatewayTrojanInbound},
-			configDomainSuffixKey: domains,
-			configOutboundKey:     gatewayDirectOutbound,
-		})
-	}
 	allowRules = append(allowRules, map[string]any{
 		configInboundKey: []string{GatewayTrojanInbound},
 		configActionKey:  rejectRouteAction,
 	})
 
+	route := map[string]any{configRulesKey: allowRules}
 	config := map[string]any{
 		configLogKey: map[string]any{configLevelKey: normalizeLogLevel(options.LogLevel)},
 		configInboundsKey: []map[string]any{{
@@ -83,7 +86,21 @@ func GenerateGatewaySessionConfig(options GatewaySessionOptions) ([]byte, error)
 			configTypeKey: DirectOutbound,
 			configTagKey:  gatewayDirectOutbound,
 		}},
-		configRouteKey: map[string]any{configRulesKey: allowRules},
+		configRouteKey: route,
+	}
+	if options.Network.DNSServer != "" {
+		dnsServer, parseErr := netip.ParseAddr(options.Network.DNSServer)
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid Gateway cluster DNS address %q: %w", options.Network.DNSServer, parseErr)
+		}
+		config["dns"] = map[string]any{
+			configFinalKey: clusterDNSServer,
+			"servers": []map[string]any{{
+				configTypeKey: configUDPType, configTagKey: clusterDNSServer,
+				configServerKey: dnsServer.String(),
+			}},
+		}
+		route["default_domain_resolver"] = clusterDNSServer
 	}
 	return json.MarshalIndent(config, "", "  ")
 }
