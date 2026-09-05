@@ -40,6 +40,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	clientapp "github.com/fengqi-dev/kube-loop/internal/app"
 	clientdataplane "github.com/fengqi-dev/kube-loop/internal/client/dataplane"
+	clientforward "github.com/fengqi-dev/kube-loop/internal/client/forwardruntime"
 	clientportforward "github.com/fengqi-dev/kube-loop/internal/client/portforward"
 	clientprofile "github.com/fengqi-dev/kube-loop/internal/client/profile"
 	clientremote "github.com/fengqi-dev/kube-loop/internal/client/remote"
@@ -69,8 +70,14 @@ while True:
     connection, _ = server.accept()
     connection.sendall(b"R")
     time.sleep(2)
-    while connection.recv(65536):
-        pass
+    tail = b""
+    while True:
+        payload = connection.recv(65536)
+        if not payload:
+            break
+        tail = (tail + payload)[-4:]
+        if tail == b"DONE":
+            break
     connection.sendall(b"OK")
     connection.close()
 `
@@ -203,7 +210,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	tunStarter := &recordingTUNStarter{delegate: clientapp.NewSingboxRuntime(nil, "")}
 	manager, err := clientdataplane.NewManager(source, clientdataplane.Config{
 		StartTimeout: 10 * time.Second, RecoveryAttempts: 10, RecoveryBackoff: 200 * time.Millisecond,
-		TUNStarter: tunStarter,
+		TUNStarter: tunStarter, ForwardStart: startE2EForwardRuntime,
 		OnStatus: func(event clientdataplane.StatusEvent) {
 			statusEvents <- event
 		},
@@ -419,6 +426,7 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	}
 	secondManager, err := clientdataplane.NewManager(secondSource, clientdataplane.Config{
 		StartTimeout: 10 * time.Second, RecoveryAttempts: 3, RecoveryBackoff: 200 * time.Millisecond,
+		ForwardStart: startE2EForwardRuntime,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -617,6 +625,21 @@ func TestGatewayPodRestartRecoversDataPlane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SOCKS endpoint survived local core crash: %v", err)
 	}
+}
+
+func startE2EForwardRuntime(
+	ctx context.Context,
+	options clientdataplane.ForwardOptions,
+) (clientdataplane.ForwardCore, error) {
+	binary := strings.TrimSpace(os.Getenv("KUBELOOP_SINGBOX_PATH"))
+	if binary == "" {
+		return nil, errors.New("KUBELOOP_SINGBOX_PATH is required for the Gateway forward E2E")
+	}
+	return (clientforward.Starter{BinaryPath: binary}).Start(ctx, clientforward.Options{
+		SessionID: options.SessionID, Generation: options.Generation,
+		Endpoint: options.Endpoint, RelayTicket: options.RelayTicket,
+		TLSInsecure: options.TLSInsecure,
+	})
 }
 
 type loopbackProxy struct {
@@ -1504,13 +1527,6 @@ func requestThroughSOCKS(ctx context.Context, socksAddress, target string) error
 	); err != nil {
 		return err
 	}
-	writeCloser, ok := connection.(interface{ CloseWrite() error })
-	if !ok {
-		return errors.New("SOCKS connection does not support TCP half-close")
-	}
-	if err := writeCloser.CloseWrite(); err != nil {
-		return fmt.Errorf("half-close Gateway health request: %w", err)
-	}
 	response, err := http.ReadResponse(bufio.NewReader(connection), &http.Request{Method: http.MethodGet})
 	if err != nil {
 		return err
@@ -1717,12 +1733,7 @@ func startSlowConsumerRequest(t *testing.T, ctx context.Context, socksAddress, t
 			result <- err
 			return
 		}
-		writer, ok := connection.(interface{ CloseWrite() error })
-		if !ok {
-			result <- errors.New("drain-window connection does not support half-close")
-			return
-		}
-		if err := writer.CloseWrite(); err != nil {
+		if _, err := connection.Write([]byte("DONE")); err != nil {
 			result <- err
 			return
 		}
@@ -1760,8 +1771,7 @@ func assertSlowConsumerIsolation(t *testing.T, ctx context.Context, socksAddress
 			slowResult <- err
 			return
 		}
-		writer := connection.(interface{ CloseWrite() error })
-		if err := writer.CloseWrite(); err != nil {
+		if _, err := connection.Write([]byte("DONE")); err != nil {
 			slowResult <- err
 			return
 		}
