@@ -6,7 +6,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import { useTheme } from "@/hooks/use-theme";
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
-import { navKeys, type AppView } from "@/components/layout/navigation";
+import { defaultView, hasExplorer, navKeys, type AppView } from "@/components/layout/navigation";
 import { ServerAccessView, useServerConnection } from "@/components/server/server-access-view";
 import { ServerNetworkView } from "@/components/server/server-network-view";
 import { ServerWorkloadView } from "@/components/server/server-workload-view";
@@ -37,7 +37,7 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
   const mobile = useIsMobile();
   const [data, setData] = useState(initialData);
   const [profiles, setProfiles] = useState(initialData.serverProfiles);
-  const [view, setView] = useState<AppView>("network");
+  const [view, setView] = useState<AppView>(defaultView);
   const [checking, setChecking] = useState(false);
   const [resourceHost, setResourceHost] = useState<HTMLDivElement | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -53,6 +53,7 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
   const connected = inventory?.dataPlane?.state === "connected";
   const profileId = auth.authenticated ? profile?.id ?? "" : "";
   const namespace = inventory?.namespace;
+  const explorerAvailable = hasExplorer(view);
   useEffect(() => {
     try { localStorage.setItem("kubeloop.sidebar.collapsed", sidebarOpen ? "0" : "1"); } catch { /* optional preference */ }
   }, [sidebarOpen]);
@@ -67,7 +68,7 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
     <div className="desktop-shell">
       <AppHeader platform={data.platform} />
       <div className="desktop-body">
-        <AppSidebar onResourceHost={setResourceHost} view={view} connection={connection} open={mobile ? drawerOpen : sidebarOpen} onNavigate={navigate} onDismiss={() => setDrawerOpen(false)} />
+        <AppSidebar onResourceHost={setResourceHost} view={view} connection={connection} open={explorerAvailable && (mobile ? drawerOpen : sidebarOpen)} onNavigate={navigate} onDismiss={() => setDrawerOpen(false)} />
         <div className="workbench">
           {(error || dataPlaneError) && view !== "overview" && <div className="shell-error" role="alert">{error || dataPlaneError}<button onClick={() => navigate("overview")}>{t("nav.overview")}<ChevronDown size={12} /></button></div>}
           <main className="app-content" aria-label={t(navKeys[view])}>
@@ -82,7 +83,7 @@ function DesktopWorkspace({ initialData }: { initialData: BootstrapData }) {
         </div>
       </div>
       <footer className="app-statusbar">
-        <button aria-label={t((mobile ? drawerOpen : sidebarOpen) ? "nav.collapseSidebar" : "nav.expandSidebar")} onClick={() => mobile ? setDrawerOpen(value => !value) : setSidebarOpen(value => !value)}><PanelLeft size={16} /></button>
+        {explorerAvailable && <button aria-label={t((mobile ? drawerOpen : sidebarOpen) ? "nav.collapseSidebar" : "nav.expandSidebar")} onClick={() => mobile ? setDrawerOpen(value => !value) : setSidebarOpen(value => !value)}><PanelLeft size={16} /></button>}
         <span className="connection-dot" data-connected={connected} /><span>{t(statusKey)}</span>
         <span className="status-context">{profile?.displayName || t("statusbar.noCluster")}{namespace ? ` / ${namespace}` : ""}</span>
         <span className="status-version">KubeLoop · {data.update.currentVersion || data.coreVersion}</span>

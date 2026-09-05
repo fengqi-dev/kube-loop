@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Bot, Boxes, ChevronRight, Circle, Gauge, Globe, Layers, LogIn, LogOut, Network, Search, Server, Settings2, type LucideIcon } from "lucide-react";
-import { navKeys, type AppView } from "./navigation";
+import { hasExplorer, navKeys, type AppView } from "./navigation";
 import { useI18n } from "@/i18n";
 import type { ServerConnection } from "@/components/server/server-access-view";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -47,7 +47,7 @@ export function AppSidebar({ view, connection, open, onNavigate, onDismiss, onRe
         {railButton("settings", Settings2)}
       </div>
     </nav>
-    {open && !["host-aliases", "mcp"].includes(view) && <>
+    {open && hasExplorer(view) && <>
       <button className="explorer-backdrop" aria-label={t("nav.collapseSidebar")} onClick={onDismiss} />
       <aside className="explorer-panel" aria-label={t("shell.explorer")}>
         <div className="explorer-caption">{t(navKeys[view])}</div>

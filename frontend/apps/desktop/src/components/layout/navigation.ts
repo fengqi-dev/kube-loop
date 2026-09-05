@@ -10,6 +10,8 @@ export type AppView =
   | "mcp"
   | "settings";
 
+export const defaultView: AppView = "overview";
+
 export const navKeys: Record<AppView, TranslationKey> = {
   overview: "nav.overview",
   clusters: "nav.clusters",
@@ -20,3 +22,9 @@ export const navKeys: Record<AppView, TranslationKey> = {
   mcp: "nav.mcp",
   settings: "nav.settings",
 };
+
+const explorerViews = new Set<AppView>(["clusters", "workload", "network", "sessions", "settings"]);
+
+export function hasExplorer(view: AppView): boolean {
+  return explorerViews.has(view);
+}
